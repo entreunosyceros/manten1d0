@@ -1,5 +1,5 @@
 ## Manten1d0: Mantenimiento básico de Ubuntu
-![Manten1d0](https://github.com/sapoclay/manten1d0/assets/6242827/358bb3c2-d0af-4f07-a592-dcee7b1ed1a0)
+<img width="798" height="766" alt="inicio" src="https://github.com/user-attachments/assets/09b50f34-0c50-40df-b053-d955fa474287" />
 ------------------------------------------------------------------
 * Manten1d0: sistema de mantenimiento básico y otras herramientas para Ubuntu.
 * Creado con: Python 3.10.12
@@ -15,8 +15,6 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 ## Características de la versión 0.6.0
 
 ### Inicio
-
-<img width="798" height="766" alt="inicio" src="https://github.com/user-attachments/assets/09b50f34-0c50-40df-b053-d955fa474287" />
 - Logo `Manten1do.png` a tamaño del área disponible.
 - Avisos de estado: Internet, disco raíz o carpeta personal (>80 % / >90 %), actualizaciones APT (incluidas las de seguridad) y problemas SMART si `smartctl` está disponible.
 - Pulsar un aviso abre la categoría relacionada. Se puede actualizar la lista o abrir el registro de acciones.
