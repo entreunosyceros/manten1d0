@@ -25,10 +25,14 @@ Raises:
 """
 
 import os
+import shutil
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+
+from registro import sudo_shell
+from tooltip import con_tooltip
 
 # Clase para realizar la limpieza de la caché de los navegadores
 class LimpiadorNavegadores:
@@ -269,7 +273,6 @@ class InstalarNavegadores:
                 )
                 # Actualizar el índice de paquetes
                 subprocess.run(["sudo", "apt-get", "update"], check=True)
-                # Instalar Microsoft Edge
                 subprocess.run(["sudo", "apt-get", "install", "-y", "microsoft-edge-stable"], check=True)
                 messagebox.showinfo("Éxito", "Microsoft Edge se ha instalado correctamente.")
             except subprocess.CalledProcessError as e:
@@ -278,5 +281,214 @@ class InstalarNavegadores:
                 progress_bar.stop()
                 progress_window.destroy()
 
-        # Ejecutar la función en un hilo separado
         threading.Thread(target=instalar).start()
+
+
+def abrir_navegador(comando, nombre):
+    try:
+        subprocess.Popen(comando if isinstance(comando, list) else [comando])
+    except FileNotFoundError:
+        messagebox.showerror("Navegadores", f"{nombre} no está instalado.")
+    except Exception as error:
+        messagebox.showerror("Navegadores", f"No se pudo abrir {nombre}: {error}")
+
+
+def _limpiar_directorio(ruta, nombre):
+    expandida = os.path.expanduser(ruta)
+    if not os.path.isdir(expandida):
+        messagebox.showinfo("Navegadores", f"No hay caché de {nombre} o no está instalado.")
+        return
+    shutil.rmtree(expandida, ignore_errors=True)
+    messagebox.showinfo("Navegadores", f"Caché de {nombre} eliminada.")
+
+
+class InstalarNavegadoresExtra:
+    @staticmethod
+    def instalar_chromium(parent=None):
+        sudo_shell(
+            "apt-get update && (apt-get install -y chromium-browser || apt-get install -y chromium)",
+            "instalar Chromium",
+            parent,
+            on_done=lambda ok: messagebox.showinfo(
+                "Navegadores",
+                "Chromium instalado." if ok else "No se pudo instalar Chromium.",
+                parent=parent,
+            ),
+        )
+
+    @staticmethod
+    def instalar_brave(parent=None):
+        comando = (
+            "curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg "
+            "https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg && "
+            'echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] '
+            'https://brave-browser-apt-release.s3.brave.com/ stable main" '
+            "> /etc/apt/sources.list.d/brave-browser-release.list && "
+            "apt-get update && apt-get install -y brave-browser"
+        )
+        sudo_shell(
+            comando,
+            "instalar Brave",
+            parent,
+            on_done=lambda ok: messagebox.showinfo(
+                "Navegadores",
+                "Brave instalado." if ok else "No se pudo instalar Brave.",
+                parent=parent,
+            ),
+        )
+
+    @staticmethod
+    def instalar_vivaldi(parent=None):
+        sudo_shell(
+            "wget -O /tmp/vivaldi-stable.deb https://downloads.vivaldi.com/stable/vivaldi-stable_amd64.deb "
+            "&& dpkg -i /tmp/vivaldi-stable.deb || apt-get -f install -y; rm -f /tmp/vivaldi-stable.deb",
+            "instalar Vivaldi",
+            parent,
+            on_done=lambda ok: messagebox.showinfo(
+                "Navegadores",
+                "Vivaldi instalado." if ok else "No se pudo instalar Vivaldi.",
+                parent=parent,
+            ),
+        )
+
+
+PERFILES_CHROMIUM = (
+    ("Chrome", os.path.expanduser("~/.config/google-chrome")),
+    ("Chromium", os.path.expanduser("~/.config/chromium")),
+    ("Brave", os.path.expanduser("~/.config/BraveSoftware/Brave-Browser")),
+    ("Vivaldi", os.path.expanduser("~/.config/vivaldi")),
+    ("Edge", os.path.expanduser("~/.config/microsoft-edge")),
+)
+
+
+def _perfiles_chromium(base):
+    encontrados = []
+    if not os.path.isdir(base):
+        return encontrados
+    for nombre in sorted(os.listdir(base)):
+        ruta = os.path.join(base, nombre)
+        if os.path.isdir(ruta) and os.path.isfile(os.path.join(ruta, "Bookmarks")):
+            encontrados.append((nombre, ruta, os.path.join(ruta, "Bookmarks")))
+    return encontrados
+
+
+def _perfiles_firefox():
+    ini = os.path.expanduser("~/.mozilla/firefox/profiles.ini")
+    if not os.path.isfile(ini):
+        return []
+    perfiles = []
+    actual = {}
+    with open(ini, encoding="utf-8") as archivo:
+        for linea in archivo:
+            linea = linea.strip()
+            if linea.startswith("[") and linea.endswith("]"):
+                if actual.get("path"):
+                    perfiles.append(actual)
+                actual = {"nombre": linea.strip("[]")}
+            elif "=" in linea:
+                clave, valor = linea.split("=", 1)
+                actual[clave.lower()] = valor
+        if actual.get("path"):
+            perfiles.append(actual)
+    resultado = []
+    raiz = os.path.expanduser("~/.mozilla/firefox")
+    for perfil in perfiles:
+        ruta = perfil["path"]
+        if not os.path.isabs(ruta):
+            ruta = os.path.join(raiz, ruta)
+        html = os.path.join(ruta, "bookmarks.html")
+        json_backup = os.path.join(ruta, "bookmarkbackups")
+        resultado.append((
+            perfil.get("name") or perfil.get("nombre") or os.path.basename(ruta),
+            ruta,
+            html if os.path.isfile(html) else json_backup,
+        ))
+    return resultado
+
+
+class PerfilesNavegadores:
+    """Lista perfiles y exporta marcadores (archivo Bookmarks / bookmarks.html)."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Perfiles y marcadores")
+        self.root.geometry("720x420")
+        self.filas = []
+
+        tk.Label(self.root, text="Perfiles de navegador", font=("Arial", 14, "bold")).pack(pady=8)
+        self.lista = tk.Listbox(self.root, font=("monospace", 10))
+        self.lista.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
+
+        marco = tk.Frame(self.root)
+        marco.pack(pady=8)
+        con_tooltip(
+            tk.Button(marco, text="Actualizar", command=self.cargar),
+            "Vuelve a detectar perfiles de Brave, Chrome, Chromium, Edge, Firefox y Vivaldi",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(marco, text="Exportar marcadores", command=self.exportar),
+            "Exporta los marcadores del perfil seleccionado a un archivo HTML",
+        ).pack(side=tk.LEFT, padx=6)
+        self.cargar()
+
+    def cargar(self):
+        self.lista.delete(0, tk.END)
+        self.filas = []
+        for nombre, base in PERFILES_CHROMIUM:
+            for perfil, ruta, marcadores in _perfiles_chromium(base):
+                self.filas.append({
+                    "navegador": nombre,
+                    "perfil": perfil,
+                    "ruta": ruta,
+                    "marcadores": marcadores,
+                })
+                self.lista.insert(tk.END, f"{nombre:<10}  {perfil:<16}  {ruta}")
+        for nombre, ruta, marcadores in _perfiles_firefox():
+            self.filas.append({
+                "navegador": "Firefox",
+                "perfil": nombre,
+                "ruta": ruta,
+                "marcadores": marcadores,
+            })
+            self.lista.insert(tk.END, f"{'Firefox':<10}  {nombre:<16}  {ruta}")
+        if not self.filas:
+            self.lista.insert(tk.END, "No se encontraron perfiles locales.")
+
+    def exportar(self):
+        seleccion = self.lista.curselection()
+        if not self.filas or not seleccion:
+            messagebox.showinfo("Marcadores", "Selecciona un perfil.", parent=self.root)
+            return
+        fila = self.filas[seleccion[0]]
+        origen = fila["marcadores"]
+        if os.path.isdir(origen):
+            archivos = [
+                os.path.join(origen, nombre)
+                for nombre in os.listdir(origen)
+                if nombre.endswith(".json")
+            ]
+            archivos.sort(key=os.path.getmtime, reverse=True)
+            origen = archivos[0] if archivos else None
+        if not origen or not os.path.isfile(origen):
+            messagebox.showwarning(
+                "Marcadores",
+                "Este perfil no tiene un archivo de marcadores exportable.",
+                parent=self.root,
+            )
+            return
+        extension = ".json" if origen.endswith(".json") or os.path.basename(origen) == "Bookmarks" else ".html"
+        destino = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Exportar marcadores",
+            defaultextension=extension,
+            initialfile=f"marcadores-{fila['navegador']}-{fila['perfil']}{extension}",
+            filetypes=(("Marcadores", f"*{extension}"), ("Todos", "*.*")),
+        )
+        if not destino:
+            return
+        try:
+            shutil.copy2(origen, destino)
+        except OSError as error:
+            messagebox.showerror("Marcadores", str(error), parent=self.root)
+            return
+        messagebox.showinfo("Marcadores", f"Marcadores copiados a:\n{destino}", parent=self.root)

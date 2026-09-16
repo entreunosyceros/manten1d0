@@ -14,48 +14,47 @@ Function:
  
 import tkinter as tk
 import os
-import preferencias
-
-import os
 import configparser
 
+import preferencias
+
+
 def obtener_version_actual():
-    # Obtener el directorio del archivo que llama a la función
     directorio_actual = os.path.dirname(os.path.abspath(__file__))
-    # Combinar el directorio con el nombre del archivo config.ini
     ruta_config = os.path.join(directorio_actual, 'config.ini')
-    
     config = configparser.ConfigParser()
     config.read(ruta_config)
     return config['Version']['actual']
 
 
-
 def mostrar_about():
-     # Obtener la versión actual del programa desde el archivo de configuración
     version_actual = obtener_version_actual()
-    
+
     about_window = tk.Toplevel()
     about_window.title("Acerca de")
     about_window.geometry("400x250")
     about_window.resizable(False, False)
-    
-    
-    # Obtener la ruta absoluta del directorio del script
+
     dir_actual = os.path.dirname(os.path.realpath(__file__))
     ruta_imagen = os.path.join(dir_actual, "logo.png")
-
-    # Cargar la imagen
     img = tk.PhotoImage(file=ruta_imagen)
 
-    # Mostrar la imagen en un Label
     img_label = tk.Label(about_window, image=img)
-    img_label.image = img  # Mantener una referencia para evitar que la imagen sea eliminada por el recolector de basura
+    img_label.image = img
     img_label.pack(pady=10)
 
-    about_label = tk.Label(about_window, text=f"Manten1-d0 de Sistema Ubuntu\nVersión: {version_actual}\nEste programa realiza tareas de mantenimiento básico\nen sistemas Ubuntu.\nNo se dan garantías de ningún tipo.\nRepositorio: https://github.com/sapoclay/manten1d0")
+    about_label = tk.Label(
+        about_window,
+        text=(
+            f"Manten1-d0 de Sistema Ubuntu\n"
+            f"Versión: {version_actual}\n"
+            "Este programa realiza tareas de mantenimiento básico\n"
+            "en sistemas Ubuntu.\n"
+            "No se dan garantías de ningún tipo.\n"
+            "Repositorio: https://github.com/sapoclay/manten1d0"
+        ),
+    )
     about_label.pack(padx=20, pady=20)
-    
+
     if preferencias.tema_seleccionado != "Claro":
-            # Aplicar el tema seleccionado al mensaje personalizado
-            preferencias.cambiar_tema(about_window, preferencias.tema_seleccionado)
+        preferencias.cambiar_tema(about_window, preferencias.tema_seleccionado)

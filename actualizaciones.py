@@ -30,6 +30,7 @@ import os
 import sys
 import preferencias
 import configparser
+from tooltip import ToolTip
 
 def obtener_version_actual():
     # Obtener el directorio del archivo que llama a la función
@@ -160,6 +161,7 @@ def mostrar_ventana_actualizaciones():
     # Botón para iniciar la comprobación de actualizaciones
     boton_comprobar = tk.Button(ventana_actualizaciones, text="Buscar e Instalar Actualizaciones", command=comprobar_actualizaciones)
     boton_comprobar.pack()
+    ToolTip(boton_comprobar, "Descarga e instala la versión más reciente de Manten1d0 desde GitHub")
 
     # Aplicar el tema seleccionado a la nueva ventana
     preferencias.cambiar_tema(ventana_actualizaciones, preferencias.tema_seleccionado)

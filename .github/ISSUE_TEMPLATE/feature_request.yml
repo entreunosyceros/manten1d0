@@ -1,0 +1,62 @@
+name: Solicitud de mejora
+description: Proponer una nueva función o mejora
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe el problema o la necesidad antes que la solución concreta. Así es más fácil valorar la propuesta para **Manten1d0**.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - Inicio / avisos
+        - Perfil de usuario
+        - Información
+        - Sistema
+        - Archivos
+        - Internet / Wi-Fi / DNS
+        - Red local
+        - Navegadores
+        - Diccionario / notas
+        - Bandeja del sistema
+        - Interfaz, tema y accesibilidad
+        - Documentación
+        - Instalación / empaquetado `.deb`
+        - Otro
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: ¿Qué problema o necesidad quieres resolver?
+      placeholder: "Ej.: Quiero ver si la conexión Wi-Fi tiene mucho ruido de radio antes de echarle la culpa al ISP."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solución propuesta (opcional)
+      description: Cómo imaginas que debería funcionar en Manten1d0
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Alcance
+      options:
+        - label: Estoy dispuesto/a a contribuir con un PR si la propuesta encaja
+          required: false

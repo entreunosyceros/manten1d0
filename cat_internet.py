@@ -36,18 +36,18 @@ Funciones:
 import subprocess
 from password import obtener_contrasena
 import time
-from tkinter import messagebox
+from tkinter import messagebox, scrolledtext
 import shutil
 from cat_informacion import Informacion
 import tkinter as tk
 import preferencias
-import subprocess
 import socket
+import os
+import re
 import speedtest
-import threading
-from tkinter import scrolledtext
-from tooltip import ToolTip    
+from tooltip import ToolTip
 from placeholder import entradaConPlaceHolder
+from registro import confirmar, registrar, en_hilo, ventana_progreso
 
 """ 
 
@@ -97,74 +97,54 @@ def reiniciar_systemd_networkd():
     except subprocess.CalledProcessError as e:
         print(f"Error al reiniciar systemd-networkd: {e}")
 
-def reiniciar_tarjeta_red(interfaz, etiqueta_ip_local_info, etiqueta_ip_publica_info, callback=None):
-        """
-        Reinicia una interfaz de red específica desactivándola y activándola nuevamente. 
-        Actualiza las etiquetas de la interfaz gráfica con las nuevas direcciones IP.
+def reiniciar_tarjeta_red(interfaz, parent=None, callback=None):
+    if not interfaz:
+        messagebox.showwarning("Tarjeta de red no seleccionada", "Por favor, seleccione una tarjeta de red.", parent=parent)
+        return
+    if not confirmar(
+        f"¿Reiniciar la interfaz {interfaz}?\nLa conexión se cortará unos segundos.",
+        parent,
+    ):
+        registrar("Reiniciar tarjeta de red", f"{interfaz} cancelado", False)
+        return
 
-        Args:
-            interfaz (str): Nombre de la interfaz de red a reiniciar.
-            etiqueta_ip_local_info (tk.Label): Etiqueta de Tkinter para mostrar la dirección IP local. Deshabilitado.
-            etiqueta_ip_publica_info (tk.Label): Etiqueta de Tkinter para mostrar la dirección IP pública.Deshabilitado.
-            callback (function, optional): Función de callback para ejecutar después de reiniciar la tarjeta de red.
+    contrasena = obtener_contrasena()
+    if isinstance(contrasena, bytes):
+        contrasena = contrasena.decode("utf-8")
+    widget = parent or tk._default_root
+    progreso, etiqueta = ventana_progreso(widget, "Reiniciar red", f"Reiniciando {interfaz}...")
 
-        Si no se selecciona ninguna interfaz o no se proporciona la contraseña, muestra una advertencia. Si ifconfig no está instalado, 
-        lo instala automáticamente.
-        """
-        try:
-            # Verificar si se ha seleccionado una interfaz
-            if not interfaz:
-                messagebox.showwarning("Tarjeta de red no seleccionada", "Por favor, seleccione una tarjeta de red.")
-                return
+    def trabajador():
+        if not shutil.which("ifconfig"):
+            instalacion = subprocess.run(
+                ["sudo", "-S", "-p", "", "apt", "install", "-y", "net-tools"],
+                input=contrasena + "\n",
+                capture_output=True,
+                text=True,
+            )
+            if instalacion.returncode != 0:
+                raise RuntimeError("No se pudo instalar net-tools/ifconfig.")
+        for estado in ("down", "up"):
+            resultado = subprocess.run(
+                ["sudo", "-S", "-p", "", "ifconfig", interfaz, estado],
+                input=contrasena + "\n",
+                capture_output=True,
+                text=True,
+            )
+            if resultado.returncode != 0:
+                raise RuntimeError(resultado.stderr or f"ifconfig {estado} falló")
+            time.sleep(3)
+        registrar("Reiniciar tarjeta de red", interfaz, True)
+        return interfaz
 
-            # Obtener la contraseña
-            contrasena = obtener_contrasena()
-            if contrasena is None:
-                messagebox.showwarning("Contraseña requerida", "Debes ingresar la contraseña para reiniciar la tarjeta de red.")
-                return
+    def terminar(_interfaz):
+        if progreso.winfo_exists():
+            progreso.destroy()
+        messagebox.showinfo("Reinicio de red", f"La interfaz {_interfaz} se reinició correctamente.", parent=widget)
+        if callback:
+            callback("La tarjeta de red se reinició correctamente.")
 
-            # Convertir la contraseña a cadena si es de tipo bytes
-            if isinstance(contrasena, bytes):
-                contrasena = contrasena.decode('utf-8')
-
-            # Instalar ifconfig con sudo si no está instalado
-            if not shutil.which("ifconfig"):
-                messagebox.showinfo("Instalación de ifconfig", "ifconfig no está instalado en el sistema. Se procederá a su instalación.")
-
-                comando_instalacion = ['sudo', '-S', 'apt', 'install', 'net-tools']
-                proceso_instalacion = subprocess.run(comando_instalacion, input=contrasena, universal_newlines=True, check=True)
-                if proceso_instalacion.returncode == 0:
-                    messagebox.showinfo("Instalación exitosa", "'ifconfig' se ha instalado correctamente. Continuamos con el reinicio de la tarjeta de red...")
-                else:
-                    messagebox.showerror("Error de instalación", "Ha ocurrido un error durante la instalación de 'ifconfig'.")
-                    return
-
-            # Desactivar y luego activar la interfaz de red específica
-            subprocess.run(['sudo', '-S', 'ifconfig', interfaz, 'down'], input=contrasena, universal_newlines=True, check=True)
-            time.sleep(7)
-            messagebox.showinfo("Reinicio de red", "Tarjeta de red apagada correctamente")
-
-            subprocess.run(['sudo', '-S', 'ifconfig', interfaz, 'up'], input=contrasena, universal_newlines=True, check=True)
-            time.sleep(7)
-            messagebox.showinfo("Reinicio de red", "Tarjeta de red iniciada correctamente")
-
-            # Esperar unos segundos antes de obtener las nuevas direcciones IP
-            time.sleep(7)
-
-            # Obtener las nuevas direcciones IP después de reiniciar la tarjeta de red
-            informacion = Informacion()
-            nueva_ip_local = informacion.obtener_direccion_ip_local()
-            nueva_ip_publica = informacion.obtener_direccion_ip_publica()
-
-            # Actualizar las etiquetas con las nuevas direcciones IP
-#            etiqueta_ip_local_info.config(text=nueva_ip_local)
-#            etiqueta_ip_publica_info.config(text=nueva_ip_publica)
-
-            if callback:
-                callback("La tarjeta de red se reinició correctamente.")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al reiniciar la tarjeta de red: {e}")
+    en_hilo(widget, trabajador, al_terminar=terminar)
 
 def mostrar_resultado_ping(resultado_ping):
     """
@@ -184,245 +164,401 @@ def mostrar_resultado_ping(resultado_ping):
     preferencias.cambiar_tema(resultado_label, preferencias.tema_seleccionado)
 
 def hacer_ping(entry_url):
-    """
-    Realiza un comando ping a una URL especificada por el usuario y muestra el resultado.
-
-    Args:
-        entry_url (tk.Entry): Entrada de Tkinter que contiene la URL para hacer ping.
-
-    Si no se ingresa una URL, muestra un mensaje de error. Si el ping falla, muestra un mensaje de error con el motivo.
-    """
     url = entry_url.get()
     if not url:
         messagebox.showerror("Error", "Por favor, ingrese una URL para hacer ping.")
         return
-    
-    def eliminar_protocolo(url):
-        """
-        Elimina el protocolo de una URL.
 
-        Args:
-            url (str): URL de la que se eliminará el protocolo.
-
-        Retorna:
-            str: URL sin el protocolo.
-        """
-        # Lista de protocolos conocidos
+    def eliminar_protocolo(destino):
         protocolos = ['http://', 'https://', 'ftp://', 'ftps://', 'sftp://', 'ssh://', 'telnet://', 'smtp://', 'imap://', 'pop3://']
-
-        # Iterar sobre los protocolos y eliminar el primero que coincida con la URL
         for protocolo in protocolos:
-            if url.startswith(protocolo):
-                return url[len(protocolo):]  # Eliminar el protocolo de la URL
+            if destino.startswith(protocolo):
+                return destino[len(protocolo):]
+        return destino
 
-        # Si no se encuentra ningún protocolo conocido, devolver la URL sin cambios
-        return url
+    destino = eliminar_protocolo(url)
+    progreso, _et = ventana_progreso(entry_url.winfo_toplevel(), "Ping", f"Haciendo ping a {destino}...")
 
+    def trabajador():
+        resultado = subprocess.run(
+            ["/bin/ping", "-c", "4", destino],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+        return resultado.stdout or resultado.stderr or "Sin respuesta"
+
+    def terminar(texto):
+        if progreso.winfo_exists():
+            progreso.destroy()
+        mostrar_resultado_ping(texto)
+
+    en_hilo(entry_url, trabajador, al_terminar=terminar)
+
+
+def _cmd_red(args, timeout=12):
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
     try:
-        url_sin_protocolo = eliminar_protocolo(url)
-        resultado = subprocess.run(['/bin/ping', '-c', '4', url_sin_protocolo], capture_output=True, text=True, timeout=10)
-        resultado_ping = resultado.stdout
-        mostrar_resultado_ping(resultado_ping)
-    except subprocess.TimeoutExpired:
-        messagebox.showerror("Error", "Tiempo de espera de ping agotado. No se recibió respuesta.")
-    except Exception as e:
-        messagebox.showerror("Error", f"Ocurrió un error al hacer ping a la URL: {e}")
+        return subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout, env=entorno
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        return subprocess.CompletedProcess(args, 1, "", str(error))
+
+
+def _es_wifi(interfaz):
+    return bool(interfaz) and os.path.isdir(f"/sys/class/net/{interfaz}/wireless")
+
+
+def _primera_wifi():
+    try:
+        for nombre in os.listdir("/sys/class/net"):
+            if _es_wifi(nombre):
+                return nombre
+    except OSError:
+        return ""
+    return ""
+
+
+def _valorar_snr(snr):
+    if snr is None:
+        return "No disponible"
+    if snr >= 40:
+        return "excelente"
+    if snr >= 25:
+        return "buena"
+    if snr >= 15:
+        return "regular"
+    return "mala"
+
+
+def _valorar_senal(dbm):
+    if dbm is None:
+        return "No disponible"
+    if dbm >= -50:
+        return "excelente"
+    if dbm >= -60:
+        return "buena"
+    if dbm >= -70:
+        return "aceptable"
+    if dbm >= -80:
+        return "débil"
+    return "muy débil"
+
+
+def _wifi_proc(interfaz):
+    try:
+        with open("/proc/net/wireless", encoding="utf-8") as archivo:
+            for linea in archivo:
+                if not linea.strip().startswith(interfaz):
+                    continue
+                partes = linea.replace(":", " ").split()
+                if len(partes) < 5:
+                    return None, None
+                try:
+                    nivel = float(partes[3].rstrip("."))
+                    ruido = float(partes[4].rstrip("."))
+                except ValueError:
+                    return None, None
+                if ruido <= -200:
+                    ruido = None
+                return int(nivel), int(ruido) if ruido is not None else None
+    except OSError:
+        pass
+    return None, None
+
+
+def _wifi_iw(interfaz):
+    ssid = None
+    senal = None
+    ruido = None
+    enlace = _cmd_red(["iw", "dev", interfaz, "link"], timeout=8)
+    if enlace.returncode == 0:
+        for linea in enlace.stdout.splitlines():
+            texto = linea.strip()
+            if texto.startswith("SSID:"):
+                ssid = texto.split(":", 1)[1].strip()
+            elif texto.startswith("signal:"):
+                coinc = re.search(r"(-?\d+)", texto)
+                if coinc:
+                    senal = int(coinc.group(1))
+    encuesta = _cmd_red(["iw", "dev", interfaz, "survey", "dump"], timeout=8)
+    if encuesta.returncode == 0:
+        en_uso = False
+        actual = None
+        for linea in encuesta.stdout.splitlines():
+            texto = linea.strip()
+            if texto.startswith("frequency:"):
+                en_uso = "[in use]" in texto
+            elif texto.startswith("noise:"):
+                coinc = re.search(r"(-?\d+)", texto)
+                if coinc:
+                    actual = int(coinc.group(1))
+                    if en_uso:
+                        ruido = actual
+        if ruido is None and actual is not None:
+            ruido = actual
+    return ssid, senal, ruido
+
+
+def _estadisticas_iface(interfaz):
+    base = f"/sys/class/net/{interfaz}/statistics"
+    valores = {}
+    for clave in ("rx_errors", "rx_dropped", "rx_crc_errors", "collisions", "tx_errors"):
+        try:
+            with open(os.path.join(base, clave), encoding="utf-8") as archivo:
+                valores[clave] = archivo.read().strip()
+        except OSError:
+            valores[clave] = "N/D"
+    return valores
+
+
+def _ping_internet():
+    for destino in ("1.1.1.1", "8.8.8.8"):
+        resultado = _cmd_red(["/bin/ping", "-c", "8", "-i", "0.3", "-W", "2", destino], timeout=20)
+        texto = resultado.stdout or ""
+        if "transmitted" not in texto and "transmitted" not in (resultado.stderr or ""):
+            continue
+        perdido = None
+        media = None
+        jitter = None
+        coinc_loss = re.search(r"(\d+(?:\.\d+)?)% packet loss", texto)
+        if coinc_loss:
+            perdido = float(coinc_loss.group(1))
+        coinc_rtt = re.search(
+            r"rtt [^=]+=\s*[\d.]+/([\d.]+)/[\d.]+/([\d.]+)",
+            texto,
+        )
+        if coinc_rtt:
+            media = float(coinc_rtt.group(1))
+            jitter = float(coinc_rtt.group(2))
+        return destino, perdido, media, jitter, resultado.returncode == 0
+    return None, None, None, None, False
+
+
+def medir_nivel_ruido(interfaz=""):
+    """
+    Combina ruido de radio (Wi-Fi) y estabilidad de la ruta a Internet (pérdida/jitter).
+    El ruido RF solo existe en inalámbrico; en cable se muestran errores de la NIC.
+    """
+    interfaz = (interfaz or "").strip() or _primera_wifi()
+    lineas = []
+
+    if interfaz and _es_wifi(interfaz):
+        ssid, senal_iw, ruido_iw = _wifi_iw(interfaz)
+        senal_proc, ruido_proc = _wifi_proc(interfaz)
+        senal = senal_iw if senal_iw is not None else senal_proc
+        ruido = ruido_iw if ruido_iw is not None else ruido_proc
+        snr = (senal - ruido) if senal is not None and ruido is not None else None
+        lineas.append(f"Enlace Wi-Fi ({interfaz})")
+        lineas.append(f"Red: {ssid or 'no asociada'}")
+        if senal is not None:
+            lineas.append(f"Señal: {senal} dBm ({_valorar_senal(senal)})")
+        else:
+            lineas.append("Señal: no disponible")
+        if ruido is not None:
+            lineas.append(f"Ruido de radio: {ruido} dBm")
+        else:
+            lineas.append(
+                "Ruido de radio: el adaptador no lo informa (habitual en muchos chips)."
+            )
+        if snr is not None:
+            lineas.append(f"Relación señal/ruido (SNR): {snr} dB ({_valorar_snr(snr)})")
+            lineas.append(
+                "El SNR es señal menos ruido. Cuanto más alto, menos interferencia "
+                "(microondas, vecinos, Bluetooth)."
+            )
+        else:
+            lineas.append("SNR: no se puede calcular sin ruido de radio.")
+        lineas.append("")
+    elif interfaz:
+        stats = _estadisticas_iface(interfaz)
+        lineas.append(f"Enlace por cable ({interfaz})")
+        lineas.append("En Ethernet no hay ruido de radio. Se muestran errores del adaptador:")
+        lineas.append(f"Errores de recepción: {stats['rx_errors']}")
+        lineas.append(f"CRC: {stats['rx_crc_errors']}")
+        lineas.append(f"Descartes: {stats['rx_dropped']}")
+        lineas.append(f"Errores de envío: {stats['tx_errors']}")
+        lineas.append(f"Colisiones: {stats['collisions']}")
+        lineas.append("")
+    else:
+        lineas.append("No hay una interfaz seleccionada ni un Wi-Fi activo.")
+        lineas.append("")
+
+    destino, perdido, media, jitter, ok = _ping_internet()
+    lineas.append("Ruta a Internet")
+    if not ok and destino is None:
+        lineas.append("No se pudo hacer ping a 1.1.1.1 ni a 8.8.8.8.")
+        return "\n".join(lineas)
+    lineas.append(f"Destino: {destino}")
+    if perdido is not None:
+        lineas.append(f"Pérdida de paquetes: {perdido:.1f} %")
+    if media is not None:
+        lineas.append(f"Latencia media: {media:.1f} ms")
+    if jitter is not None:
+        lineas.append(f"Jitter (variación): {jitter:.1f} ms")
+        if perdido == 0 and jitter < 10:
+            valoracion = "estable (poco ruido en la ruta)"
+        elif perdido is not None and perdido < 2 and jitter < 30:
+            valoracion = "aceptable"
+        else:
+            valoracion = "inestable (mucho ruido o pérdida en la ruta)"
+        lineas.append(f"Valoración: {valoracion}")
+    lineas.append(
+        "El jitter y la pérdida de paquetes miden el «ruido» de la conexión a Internet, "
+        "distinto del ruido de radio del Wi-Fi."
+    )
+    return "\n".join(lineas)
+
 
 class RedTools:
     def __init__(self, root):
-        """
-        Inicializa la clase RedTools.
-
-        Args:
-            root: El widget raíz de Tkinter.
-        """
         self.root = root
         self.area_central = None
 
     def set_area_central(self, area_central):
-        """
-        Establece el área central donde se mostrarán las herramientas relacionadas con la red.
-
-        Args:
-            area_central: El área central de la interfaz gráfica de Tkinter.
-        """
         self.area_central = area_central
 
     def escanear_puertos(self):
-        """
-        Realiza un escaneo de puertos en una dirección IP específica.
-        """
-        def realizar_escaneo(ip):
-            """
-            Función interna para realizar el escaneo de puertos.
-            """
-            try:
-                for puerto in range(1, 1025):
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(0.5)
-                    resultado = s.connect_ex((ip, puerto))
-                    if resultado == 0:
-                        resultado_text.insert(tk.END, f"Puerto {puerto}: Abierto\n")
-                    s.close()
-                # Cerramos la ventana de progreso al finalizar el escaneo
-                progress_window.destroy()
-            except Exception as e:
-                resultado_text.insert(tk.END, f"Error: {e}\n")
-                # Cerramos la ventana de progreso si ocurre un error
-                progress_window.destroy()
-
-        # Limpiar el área central
         self.limpiar_area_central()
-
-        # Crear etiquetas y entradas
         tk.Label(self.area_central, text="Escaneo de Puertos", font=("Arial", 14, "bold")).pack(pady=10)
         tk.Label(self.area_central, text="Introduce la IP a escanear:", font=("Arial", 12)).pack(pady=5)
         entry_ip = entradaConPlaceHolder(self.area_central, placeholder="Ejemplo de IP: 8.8.8.8", width=30)
         entry_ip.pack(pady=5)
-
-        # Crear área de texto para mostrar resultados
         resultado_text = tk.Text(self.area_central, height=20, width=80)
         resultado_text.pack(pady=10)
 
-        # Función para iniciar el escaneo
         def iniciar_escaneo():
-            ip = entry_ip.get()
+            ip = entry_ip.get().strip()
+            if not ip:
+                messagebox.showwarning("Escaneo", "Indica una dirección IP.")
+                return
+            progreso, _et = ventana_progreso(self.root, "Escaneo de puertos", f"Escaneando {ip}...")
 
-            # Crear una ventana de progreso
-            global progress_window
-            progress_window = tk.Toplevel(self.root)
-            progress_window.title("Progreso")
-            progress_window.geometry("400x100")
-            progress_window.resizable(False, False)
+            def trabajador():
+                abiertos = []
+                for puerto in range(1, 1025):
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(0.2)
+                    if s.connect_ex((ip, puerto)) == 0:
+                        abiertos.append(puerto)
+                    s.close()
+                return abiertos
 
-            # Etiqueta que muestra el mensaje de progreso
-            progress_label = tk.Label(progress_window, text="Escaneando puertos... Espera un momento...", padx=10, pady=10)
-            progress_label.pack()
+            def terminar(abiertos):
+                if progreso.winfo_exists():
+                    progreso.destroy()
+                resultado_text.delete("1.0", tk.END)
+                if abiertos:
+                    for puerto in abiertos:
+                        resultado_text.insert(tk.END, f"Puerto {puerto}: Abierto\n")
+                else:
+                    resultado_text.insert(tk.END, "No se encontraron puertos abiertos en 1-1024.\n")
 
-            # Mostramos la ventana de progreso
-            progress_window.update()
+            en_hilo(self.root, trabajador, al_terminar=terminar)
 
-            # Pequeña pausa para permitir que la ventana de progreso se muestre
-            progress_window.after(100)
-
-            # Crear un hilo para el escaneo de puertos
-            escaneo_thread = threading.Thread(target=realizar_escaneo, args=(ip,))
-            escaneo_thread.start()
-
-        # Crear botón de escaneo
         boton_escanear = tk.Button(self.area_central, text="Escanear Puertos", width=20, command=iniciar_escaneo)
         boton_escanear.pack(pady=10)
         ToolTip(boton_escanear, "Inicia el escaneo de puertos de la IP indicada")
 
     def test_velocidad(self):
-        """
-        Realiza un test de velocidad de Internet.
-        """
-        def realizar_test(resultado_text):
-            # Creamos una ventana de progreso
-            progress_window = tk.Toplevel(resultado_text.master)
-            progress_window.title("Progreso")
-            progress_window.geometry("400x100")
-            progress_window.resizable(False, False)
-
-            # Etiqueta que muestra el mensaje de progreso
-            progress_label = tk.Label(progress_window, text="Realizando el test de velocidad... Espera un momento...", padx=10, pady=10)
-            progress_label.pack()
-
-            # Mostramos la ventana de progreso
-            progress_window.update()
-
-            # Pequeña pausa para permitir que la ventana de progreso se muestre
-            progress_window.after(100)
-
-            # Realizamos el test de velocidad
-            resultado_text.delete('1.0', tk.END)
-            st = speedtest.Speedtest()
-            st.download()
-            st.upload()
-            resultados = st.results.dict()
-
-            # Mostramos los resultados en el área de texto
-            resultado_text.insert(tk.END, f"Velocidad de descarga: {resultados['download'] / 1_000_000:.2f} Mbps\n")
-            resultado_text.insert(tk.END, f"Velocidad de carga: {resultados['upload'] / 1_000_000:.2f} Mbps\n")
-            resultado_text.insert(tk.END, f"Ping: {resultados['ping']} ms\n")
-
-            # Cerramos la ventana de progreso
-            progress_window.destroy()
-
         self.limpiar_area_central()
         tk.Label(self.area_central, text="Test de Velocidad de Internet", font=("Arial", 14, "bold")).pack(pady=10)
-        boton_iniciar_test = tk.Button(self.area_central, text="Iniciar Test", command=lambda: realizar_test(resultado_text))
-        boton_iniciar_test.pack(pady=10)
-        ToolTip(boton_iniciar_test, "Inicia el Test de Velocidad")
         resultado_text = tk.Text(self.area_central, height=20, width=80)
         resultado_text.pack(pady=10)
 
+        def realizar_test():
+            progreso, _et = ventana_progreso(self.root, "Test de velocidad", "Midiendo descarga y subida...")
+
+            def trabajador():
+                st = speedtest.Speedtest()
+                st.download()
+                st.upload()
+                return st.results.dict()
+
+            def terminar(resultados):
+                if progreso.winfo_exists():
+                    progreso.destroy()
+                resultado_text.delete("1.0", tk.END)
+                resultado_text.insert(tk.END, f"Velocidad de descarga: {resultados['download'] / 1_000_000:.2f} Mbps\n")
+                resultado_text.insert(tk.END, f"Velocidad de carga: {resultados['upload'] / 1_000_000:.2f} Mbps\n")
+                resultado_text.insert(tk.END, f"Ping: {resultados['ping']} ms\n")
+
+            en_hilo(self.root, trabajador, al_terminar=terminar)
+
+        boton_iniciar_test = tk.Button(self.area_central, text="Iniciar Test", command=realizar_test)
+        boton_iniciar_test.pack(pady=10)
+        ToolTip(boton_iniciar_test, "Inicia el Test de Velocidad")
+
     def diagnostico_red(self):
-        """
-        Realiza un diagnóstico de la red.
-        """
-        def realizar_diagnostico(resultado_text):
-            # Función interna para ejecutar el diagnóstico
-            try:
-                # Creamos una ventana de progreso
-                progress_window = tk.Toplevel(resultado_text.master)
-                progress_window.title("Progreso del Diagnóstico de Red")
-                progress_window.geometry("400x100")
-                progress_window.resizable(False, False)
-
-                # Etiqueta que muestra el mensaje de progreso
-                progress_label = tk.Label(progress_window, text="Realizando diagnóstico de red... Espera un momento...", padx=10, pady=10)
-                progress_label.pack()
-
-                # Mostramos la ventana de progreso
-                progress_window.update()
-
-                # Pequeña pausa para permitir que la ventana de progreso se muestre
-                progress_window.after(100)
-
-                # Crear el resultado del diagnóstico
-                resultado_text.delete('1.0', tk.END)
-
-                # Verificar si traceroute está instalado
-                if not shutil.which("traceroute"):
-                    raise Exception("El comando 'traceroute' no está instalado. Por favor, instálalo e inténtalo de nuevo.")
-
-                # Verificar si netstat está instalado
-                if not shutil.which("netstat"):
-                    raise Exception("El comando 'netstat' no está instalado. Por favor, instálalo e inténtalo de nuevo.")
-
-                # Ejecutar traceroute
-                resultado_text.insert(tk.END, "Traceroute:\n")
-                traceroute = subprocess.Popen(['traceroute', 'www.google.com'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                for line in iter(traceroute.stdout.readline, b''):
-                    resultado_text.insert(tk.END, line.decode())
-
-                # Ejecutar netstat
-                resultado_text.insert(tk.END, "\nNetstat:\n")
-                netstat = subprocess.Popen(['netstat', '-tuln'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                for line in iter(netstat.stdout.readline, b''):
-                    resultado_text.insert(tk.END, line.decode())
-            except Exception as e:
-                # Manejar errores y mostrarlos en la ventana de progreso
-                resultado_text.insert(tk.END, f"Error: {e}\n")
-            finally:
-                # Cerrar la ventana de progreso al finalizar
-                progress_window.destroy()
-
-        # Limpiar el área central
         for widget in self.area_central.winfo_children():
             widget.destroy()
-
-        # Crear los widgets
         tk.Label(self.area_central, text="Diagnóstico de Red", font=("Arial", 14, "bold")).pack(pady=10)
-        boton_iniciar_diagnostico = tk.Button(self.area_central, text="Iniciar Diagnóstico", command=lambda: realizar_diagnostico(resultado_text))
-        boton_iniciar_diagnostico.pack(pady=10)
-        ToolTip(boton_iniciar_diagnostico, "Haz clic para iniciar el diagnóstico de la red")
         resultado_text_frame = tk.Frame(self.area_central)
         resultado_text_frame.pack(pady=10)
         resultado_text = scrolledtext.ScrolledText(resultado_text_frame, height=20, width=80, wrap=tk.NONE)
         resultado_text.pack(expand=True, fill=tk.BOTH)
+
+        def realizar_diagnostico():
+            progreso, _et = ventana_progreso(self.root, "Diagnóstico de red", "Ejecutando traceroute y netstat...")
+
+            def trabajador():
+                if not shutil.which("traceroute"):
+                    raise RuntimeError("El comando traceroute no está instalado.")
+                if not shutil.which("netstat"):
+                    raise RuntimeError("El comando netstat no está instalado.")
+                tr = subprocess.run(["traceroute", "www.google.com"], capture_output=True, text=True, timeout=90)
+                ns = subprocess.run(["netstat", "-tuln"], capture_output=True, text=True, timeout=20)
+                return f"Traceroute:\n{tr.stdout or tr.stderr}\n\nNetstat:\n{ns.stdout or ns.stderr}"
+
+            def terminar(texto):
+                if progreso.winfo_exists():
+                    progreso.destroy()
+                resultado_text.delete("1.0", tk.END)
+                resultado_text.insert(tk.END, texto)
+
+            en_hilo(self.root, trabajador, al_terminar=terminar)
+
+        boton_iniciar_diagnostico = tk.Button(self.area_central, text="Iniciar Diagnóstico", command=realizar_diagnostico)
+        boton_iniciar_diagnostico.pack(pady=10)
+        ToolTip(boton_iniciar_diagnostico, "Haz clic para iniciar el diagnóstico de la red")
+
+    def nivel_ruido(self, interfaz=""):
+        self.limpiar_area_central()
+        tk.Label(
+            self.area_central,
+            text="Nivel de ruido de la conexión",
+            font=("Arial", 14, "bold"),
+        ).pack(pady=10)
+        tk.Label(
+            self.area_central,
+            text="Wi-Fi: ruido de radio y SNR. Internet: pérdida de paquetes y jitter.",
+            wraplength=520,
+        ).pack(pady=(0, 6))
+        resultado = scrolledtext.ScrolledText(self.area_central, height=18, width=80, wrap=tk.WORD)
+        resultado.pack(pady=8, padx=10, fill=tk.BOTH, expand=True)
+
+        def medir():
+            progreso, _et = ventana_progreso(
+                self.root, "Nivel de ruido", "Midiendo señal, ruido y latencia..."
+            )
+
+            def trabajador():
+                return medir_nivel_ruido(interfaz)
+
+            def terminar(texto):
+                if progreso.winfo_exists():
+                    progreso.destroy()
+                resultado.delete("1.0", tk.END)
+                resultado.insert(tk.END, texto)
+
+            en_hilo(self.root, trabajador, al_terminar=terminar)
+
+        boton = tk.Button(self.area_central, text="Medir ahora", command=medir)
+        boton.pack(pady=8)
+        ToolTip(boton, "Mide el ruido de radio (Wi-Fi) y la estabilidad de la ruta a Internet")
+        medir()
 
     def limpiar_area_central(self):
         for widget in self.area_central.winfo_children():

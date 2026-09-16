@@ -1,67 +1,129 @@
-"""
-Funciones relacionadas con el descubrimiento de dispositivos en la red local y la gestión de eventos.
+"""Descubrimiento de dispositivos en la red local."""
 
-Imports:
-    - tkinter as tk: Para la interfaz gráfica.
-    - messagebox desde tkinter: Para mostrar mensajes de alerta.
-    - nmap: Para escanear la red local en busca de dispositivos.
-    - subprocess: Para ejecutar procesos del sistema.
-    - threading: Para ejecutar operaciones en segundo plano.
-
-Funciones:
-    - encontrar_dispositivos_en_red(): Escanea la red local en busca de dispositivos y devuelve una lista de direcciones IP.
-    - abrir_administrador_de_archivos(ip): Abre el administrador de archivos del sistema para la dirección IP especificada.
-    - doble_clic(_, lista_dispositivos): Maneja el evento de doble clic en la lista de dispositivos, abriendo el administrador de archivos 
-    para la IP seleccionada.
-
-Raises:
-    - FileNotFoundError: Si el administrador de archivos correspondiente no está instalado en el sistema.
-    - Exception: Si ocurre un error al abrir el administrador de archivos.
-"""
- 
-import tkinter as tk
-from tkinter import messagebox
-import nmap
+import socket
 import subprocess
 import threading
-import psutil
-import socket
 
-# Función para obtener la red local automáticamente
+import psutil
+import tkinter as tk
+from tkinter import messagebox
+
+try:
+    import nmap
+except ImportError:
+    nmap = None
+
+
 def obtener_red_local():
-    for interface, addrs in psutil.net_if_addrs().items():
+    for _interface, addrs in psutil.net_if_addrs().items():
         for addr in addrs:
-            if addr.family == socket.AF_INET and not addr.address.startswith('127.'):
-                ip_address = addr.address
-                netmask = addr.netmask
-                return f"{ip_address}/{netmask_to_cidr(netmask)}"
+            if addr.family == socket.AF_INET and not addr.address.startswith("127."):
+                return f"{addr.address}/{netmask_to_cidr(addr.netmask)}"
     return None
 
-def netmask_to_cidr(netmask):
-    return sum([bin(int(x)).count('1') for x in netmask.split('.')])
 
-# Función para encontrar dispositivos en la red local
+def netmask_to_cidr(netmask):
+    return sum(bin(int(x)).count("1") for x in netmask.split("."))
+
+
+def _tabla_arp():
+    tabla = {}
+    try:
+        with open("/proc/net/arp", encoding="utf-8") as archivo:
+            next(archivo)
+            for linea in archivo:
+                partes = linea.split()
+                if len(partes) >= 4 and partes[3] != "00:00:00:00:00:00":
+                    tabla[partes[0]] = partes[3]
+    except OSError:
+        pass
+    return tabla
+
+
+def _resolver_nombre(ip):
+    try:
+        nombre = socket.getfqdn(ip)
+        if nombre and nombre != ip:
+            return nombre
+    except OSError:
+        pass
+    return "—"
+
+
+def _ordenar_ip(ip):
+    try:
+        return tuple(int(octeto) for octeto in ip.split("."))
+    except ValueError:
+        return (999, 999, 999, 999)
+
+
 def encontrar_dispositivos_en_red():
-    nm = nmap.PortScanner()
+    if nmap is None:
+        raise RuntimeError("Falta el módulo python-nmap. Instálalo con: pip install python-nmap")
     red = obtener_red_local()
-    if red:
-        nm.scan(hosts=red, arguments='-sn')
-        dispositivos = [host for host in nm.all_hosts()]
-        return dispositivos
-    else:
+    if not red:
         return []
+    escaner = nmap.PortScanner()
+    escaner.scan(hosts=red, arguments="-sn")
+    hosts = list(escaner.all_hosts())
+    if not hosts:
+        return []
+
+    samba = set()
+    try:
+        puertos = nmap.PortScanner()
+        puertos.scan(
+            hosts=" ".join(hosts),
+            arguments="-p 139,445 --open --max-retries 1 --host-timeout 4s",
+        )
+        for host in puertos.all_hosts():
+            tcp = puertos[host].get("tcp") or {}
+            if any(tcp.get(puerto, {}).get("state") == "open" for puerto in (139, 445)):
+                samba.add(host)
+    except Exception:
+        pass
+
+    arp = _tabla_arp()
+    dispositivos = []
+    for host in hosts:
+        info = escaner[host]
+        nombre = info.hostname() or _resolver_nombre(host)
+        mac = (info.get("addresses") or {}).get("mac") or arp.get(host) or "—"
+        dispositivos.append({
+            "ip": host,
+            "nombre": nombre or "—",
+            "mac": mac,
+            "samba": host in samba,
+        })
+    dispositivos.sort(key=lambda item: _ordenar_ip(item["ip"]))
+    return dispositivos
+
+
+def formatear_dispositivo(item):
+    samba = "Samba: sí" if item.get("samba") else "Samba: no"
+    return f"{item['ip']:<16} {item.get('nombre') or '—':<22} {item.get('mac') or '—':<18} {samba}"
+
+
+def ip_de_linea(texto, lista=None):
+    if lista is not None:
+        seleccion = lista.curselection()
+        dispositivos = getattr(lista, "dispositivos", None)
+        if dispositivos and seleccion:
+            return dispositivos[seleccion[0]]["ip"]
+    return (texto or "").split()[0]
+
 
 def abrir_administrador_de_archivos(ip):
     try:
-        subprocess.Popen(['nautilus', f'smb://{ip}'])  # Cambiar 'nautilus' al administrador de archivos correspondiente en el sistema
+        subprocess.Popen(["nautilus", f"smb://{ip}"])
     except FileNotFoundError:
         messagebox.showerror("Error", "Administrador de archivos no encontrado.")
     except Exception as e:
         messagebox.showerror("Error", f"Error al abrir el administrador de archivos: {e}")
 
 
-# Función para manejar el evento de doble clic
 def doble_clic(_, lista_dispositivos):
-    ip_seleccionada = lista_dispositivos.get(tk.ACTIVE)
-    threading.Thread(target=abrir_administrador_de_archivos, args=(ip_seleccionada,)).start()
-
+    ip = ip_de_linea(lista_dispositivos.get(tk.ACTIVE), lista_dispositivos)
+    if not ip:
+        return
+    threading.Thread(target=abrir_administrador_de_archivos, args=(ip,), daemon=True).start()

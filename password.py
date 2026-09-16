@@ -38,6 +38,7 @@ from cryptography.fernet import Fernet
 import threading
 from subprocess import Popen, PIPE
 import sys
+from tooltip import ToolTip
 import subprocess
 import base64
 
@@ -153,6 +154,7 @@ def solicitar_contrasena_y_ejecutar(funcion, mostrar_output=True):
 
             boton_cerrar = tk.Button(ventana_resultado, text="Cerrar", command=ventana_resultado.destroy)
             boton_cerrar.pack(pady=5)
+            ToolTip(boton_cerrar, "Cierra esta ventana cuando termine el comando")
 
             # Deshabilitar el botón de cerrar mientras se está ejecutando el comando
             boton_cerrar.config(state=tk.DISABLED)

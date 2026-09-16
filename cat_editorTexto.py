@@ -1,17 +1,60 @@
+import os
+from datetime import datetime
+
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
- 
+
+
+def carpeta_notas():
+    """Carpeta fija de notas del usuario: Documentos/Manten1d0/Notas."""
+    documentos = os.path.expanduser("~/Documentos")
+    if not os.path.isdir(documentos):
+        documentos = os.path.expanduser("~/Documents")
+    if not os.path.isdir(documentos):
+        documentos = os.path.expanduser("~")
+    ruta = os.path.join(documentos, "Manten1d0", "Notas")
+    os.makedirs(ruta, exist_ok=True)
+    return ruta
+
+
+def listar_notas(limite=12):
+    carpeta = carpeta_notas()
+    notas = []
+    try:
+        nombres = os.listdir(carpeta)
+    except OSError:
+        return []
+    for nombre in nombres:
+        if not nombre.lower().endswith((".txt", ".md")):
+            continue
+        ruta = os.path.join(carpeta, nombre)
+        if os.path.isfile(ruta):
+            notas.append((os.path.getmtime(ruta), ruta, nombre))
+    notas.sort(reverse=True)
+    return notas[:limite]
+
+
+def nombre_nota_nuevo():
+    return datetime.now().strftime("nota-%Y-%m-%d-%H%M.txt")
+
+
 class EditorTextos:
-    def __init__(self, root):
+    def __init__(self, root, ruta_inicial=None):
         self.root = root
         self.root.title("Editor de Texto")
         self.root.geometry("800x600")
+        self.ruta_archivo = ruta_inicial
 
         self.create_menu()
         self.create_text_area()
         self.create_status_bar()
         self.create_context_menu()
-        self.update_word_and_char_count()
+        if ruta_inicial:
+            self._cargar_ruta(ruta_inicial)
+        else:
+            self.update_word_and_char_count()
+            self.update_line_numbers()
+        self._actualizar_titulo()
 
     def create_menu(self):
         menu_bar = tk.Menu(self.root)
@@ -22,6 +65,7 @@ class EditorTextos:
         file_menu.add_command(label="Abrir", command=self.open_file)
         file_menu.add_separator()
         file_menu.add_command(label="Guardar", command=self.save_file)
+        file_menu.add_command(label="Guardar como...", command=self.save_file_as)
         file_menu.add_separator()
         file_menu.add_command(label="Salir", command=self.exit_program)
         menu_bar.add_cascade(label="Archivo", menu=file_menu)
@@ -53,6 +97,7 @@ class EditorTextos:
         self.text_area.bind("<Key>", self.update_line_numbers)
         self.text_area.bind("<KeyRelease>", self.update_word_and_char_count)
         self.text_area.bind("<Button-3>", self.show_context_menu)
+        self.root.bind("<Control-s>", lambda _e: self.save_file())
 
     def create_status_bar(self):
         self.status_bar = tk.Label(self.root, bd=1, relief=tk.SUNKEN, anchor=tk.W)
@@ -79,31 +124,77 @@ class EditorTextos:
         text = self.text_area.get("1.0", "end-1c")
         words = len(text.split())
         characters = len(text)
-        self.status_bar.config(text=f"Palabras: {words}  Caracteres: {characters}")
+        carpeta = carpeta_notas()
+        self.status_bar.config(
+            text=f"Palabras: {words}  Caracteres: {characters}  |  Notas: {carpeta}"
+        )
+
+    def _actualizar_titulo(self):
+        nombre = os.path.basename(self.ruta_archivo) if self.ruta_archivo else "Nota nueva"
+        self.root.title(f"Editor de Texto — {nombre}")
+
+    def _cargar_ruta(self, ruta):
+        try:
+            with open(ruta, "r", encoding="utf-8") as file:
+                content = file.read()
+        except OSError as error:
+            messagebox.showerror("Notas", f"No se pudo abrir la nota:\n{error}", parent=self.root)
+            return
+        self.text_area.delete(1.0, "end")
+        self.text_area.insert("end", content)
+        self.ruta_archivo = ruta
+        self.update_line_numbers()
+        self.update_word_and_char_count()
+        self._actualizar_titulo()
+
+    def _escribir(self, ruta):
+        with open(ruta, "w", encoding="utf-8") as file:
+            file.write(self.text_area.get(1.0, "end-1c"))
+        self.ruta_archivo = ruta
+        self._actualizar_titulo()
+        messagebox.showinfo("Notas", f"Guardada en:\n{ruta}", parent=self.root)
 
     def new_file(self):
         self.text_area.delete(1.0, "end")
+        self.ruta_archivo = None
         self.update_line_numbers()
         self.update_word_and_char_count()
+        self._actualizar_titulo()
 
     def open_file(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt"), ("Markdown files", "*.md")])
+        file_path = filedialog.askopenfilename(
+            parent=self.root,
+            initialdir=carpeta_notas(),
+            filetypes=[("Text files", "*.txt"), ("Markdown files", "*.md")],
+        )
         if file_path:
-            with open(file_path, "r") as file:
-                content = file.read()
-                self.text_area.delete(1.0, "end")
-                self.text_area.insert("end", content)
-            self.update_line_numbers()
-            self.update_word_and_char_count()
+            self._cargar_ruta(file_path)
 
     def save_file(self):
-        file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt"), ("Markdown files", "*.md")])
+        if self.ruta_archivo:
+            try:
+                self._escribir(self.ruta_archivo)
+            except OSError as error:
+                messagebox.showerror("Notas", f"No se pudo guardar:\n{error}", parent=self.root)
+            return
+        self.save_file_as(os.path.join(carpeta_notas(), nombre_nota_nuevo()))
+
+    def save_file_as(self, inicial=None):
+        file_path = filedialog.asksaveasfilename(
+            parent=self.root,
+            defaultextension=".txt",
+            initialdir=carpeta_notas(),
+            initialfile=os.path.basename(inicial) if inicial else nombre_nota_nuevo(),
+            filetypes=[("Text files", "*.txt"), ("Markdown files", "*.md")],
+        )
         if file_path:
-            with open(file_path, "w") as file:
-                file.write(self.text_area.get(1.0, "end"))
+            try:
+                self._escribir(file_path)
+            except OSError as error:
+                messagebox.showerror("Notas", f"No se pudo guardar:\n{error}", parent=self.root)
 
     def exit_program(self):
-        if messagebox.askokcancel("Salir", "¿Estás seguro de que quieres salir?"):
+        if messagebox.askokcancel("Salir", "¿Estás seguro de que quieres salir?", parent=self.root):
             self.root.destroy()
 
     def copy_text(self):
@@ -119,7 +210,7 @@ class EditorTextos:
         self.text_area.edit_redo()
 
     def search_text(self):
-        search_query = simpledialog.askstring("Buscar", "Escribe el texto a buscar:")
+        search_query = simpledialog.askstring("Buscar", "Escribe el texto a buscar:", parent=self.root)
         if search_query:
             start_pos = '1.0'
             while True:
@@ -131,9 +222,10 @@ class EditorTextos:
                 start_pos = end_pos
             self.text_area.tag_config("highlight", background="yellow", foreground="black")
 
+
 def main():
     root = tk.Tk()
-    editor = EditorTextos(root)
+    EditorTextos(root)
     root.mainloop()
 
 if __name__ == "__main__":

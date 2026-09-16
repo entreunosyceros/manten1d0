@@ -1,164 +1,190 @@
 import subprocess
 import sys
 from password import obtener_contrasena
-import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox
 import os
 
-# Lista de dependencias del sistema junto con sus métodos de instalación
-DEPENDENCIAS_SISTEMA = {
-    "samba": ["sudo", "apt", "install", "-y", "samba"],
-    "nmap": ["sudo", "apt", "install", "-y", "nmap"],
-    "net-tools": ["sudo", "apt", "install", "-y", "net-tools"],
-    "ethtool": ["sudo", "apt", "install", "-y", "ethtool"],
-    "gnome-terminal": ["sudo", "apt", "install", "-y", "gnome-terminal"],
-    "python3-psutil": ["sudo", "apt", "install", "-y", "python3-psutil"],
-    "smartmontools": ["sudo", "apt", "install", "-y", "smartmontools"],
-    "traceroute": ["sudo", "apt", "install", "-y", "traceroute"],
-    "python3-dbus": ["sudo", "apt", "install", "-y", "python3-dbus"],
-    "python3-tk": ["sudo", "apt", "install", "-y", "python3-tk"],
-    "pciutils": ["sudo", "apt", "install", "-y", "pciutils"],
-    "lshw": ["sudo", "apt", "install", "-y", "lshw"],
-    "arp-scan": ["sudo", "apt", "install", "-y", "arp-scan"],
-}
+# Paquetes APT necesarios para las funciones del programa
+DEPENDENCIAS_SISTEMA = [
+    "samba",
+    "nmap",
+    "net-tools",
+    "ethtool",
+    "iw",
+    "gnome-terminal",
+    "python3-psutil",
+    "smartmontools",
+    "traceroute",
+    "python3-dbus",
+    "python3-tk",
+    "pciutils",
+    "lshw",
+    "arp-scan",
+    "cups-client",
+    "avahi-utils",
+]
 
-def verificar_dependencias_sistema():
-    dependencias_faltantes = []
-    for dependencia, instalacion in DEPENDENCIAS_SISTEMA.items():
-        proceso = subprocess.run(['dpkg', '-s', dependencia], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if proceso.returncode != 0:
-            dependencias_faltantes.append(dependencia)
-    
-    if dependencias_faltantes:
-        mensaje = "Las siguientes dependencias del sistema no están instaladas:\n\n"
-        mensaje += "\n".join(dependencias_faltantes)
-        messagebox.showinfo("Dependencias faltantes", mensaje)
-        return False
-    else:
-        return True
 
 def obtener_ruta_requirements():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(script_dir, 'requirements.txt')
+    return os.path.join(script_dir, "requirements.txt")
+
+
+def _normalizar_nombre_pip(nombre):
+    return nombre.lower().replace("_", "-")
+
+
+def _leer_requirements():
+    required_packages = {}
+    requirements_path = obtener_ruta_requirements()
+    with open(requirements_path, "r") as req_file:
+        for line in req_file:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "==" in line:
+                pkg, version = line.split("==", 1)
+                required_packages[pkg.strip()] = version.strip()
+            else:
+                required_packages[line] = None
+    return required_packages
+
+
+def _paquetes_pip_instalados():
+    installed_packages = subprocess.check_output(
+        [sys.executable, "-m", "pip", "freeze"],
+        universal_newlines=True,
+    )
+    instalados = {}
+    for pkg in installed_packages.splitlines():
+        if "==" in pkg:
+            nombre, version = pkg.split("==", 1)
+        else:
+            nombre, version = pkg, None
+        instalados[_normalizar_nombre_pip(nombre)] = version
+    return instalados
+
+
+def paquetes_sistema_faltantes():
+    faltantes = []
+    for dependencia in DEPENDENCIAS_SISTEMA:
+        proceso = subprocess.run(
+            ["dpkg", "-s", dependencia],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if proceso.returncode != 0:
+            faltantes.append(dependencia)
+    return faltantes
+
+
+def paquetes_pip_faltantes():
+    required_packages = _leer_requirements()
+    instalados = _paquetes_pip_instalados()
+    faltantes = []
+    for pkg, version in required_packages.items():
+        instalada = instalados.get(_normalizar_nombre_pip(pkg))
+        if instalada is None:
+            faltantes.append(pkg if version is None else f"{pkg}=={version}")
+        elif version is not None and instalada != version:
+            faltantes.append(f"{pkg}=={version}")
+    return faltantes
+
+
+def resumen_dependencias_faltantes():
+    return paquetes_sistema_faltantes(), paquetes_pip_faltantes()
+
+
+def verificar_dependencias_sistema():
+    faltantes = paquetes_sistema_faltantes()
+    if faltantes:
+        mensaje = "Las siguientes dependencias del sistema no están instaladas:\n\n"
+        mensaje += "\n".join(faltantes)
+        messagebox.showinfo("Dependencias faltantes", mensaje)
+        return False
+    return True
+
 
 def verificar_dependencias_pip():
     try:
-        requirements_path = obtener_ruta_requirements()
-        with open(requirements_path, 'r') as req_file:
-            required_packages = {}
-            for line in req_file:
-                line = line.strip()
-                if '==' in line:
-                    pkg, version = line.split('==')
-                    required_packages[pkg] = version
-                else:
-                    required_packages[line] = None
-            
-        installed_packages = subprocess.check_output([sys.executable, '-m', 'pip', 'freeze'], universal_newlines=True)
-        installed_packages_dict = {pkg.split('==')[0].lower(): pkg.split('==')[1] if '==' in pkg else None for pkg in installed_packages.splitlines()}
-
-        packages_to_install = []
-        for pkg, version in required_packages.items():
-            installed_version = installed_packages_dict.get(pkg.lower())
-            if installed_version is None:
-                packages_to_install.append(pkg if version is None else f"{pkg}=={version}")
-            elif version is not None and installed_version != version:
-                packages_to_install.append(f"{pkg}=={version}")
-
-        if packages_to_install:
+        faltantes = paquetes_pip_faltantes()
+        if faltantes:
             mensaje = "Las siguientes dependencias de Python no están instaladas o tienen versiones incorrectas:\n\n"
-            mensaje += "\n".join(packages_to_install)
+            mensaje += "\n".join(faltantes)
             messagebox.showinfo("Dependencias de Python faltantes", mensaje)
             return False
-        else:
-            return True
+        return True
     except Exception as e:
         messagebox.showerror("Error", f"Error al verificar dependencias de Python: {e}")
         return False
 
+
 def verificar_dependencias():
-    sistema_ok = verificar_dependencias_sistema()
-    pip_ok = verificar_dependencias_pip()
+    sistema_ok = not paquetes_sistema_faltantes()
+    pip_ok = not paquetes_pip_faltantes()
     return sistema_ok and pip_ok
 
-def instalar_dependencias(progress_bar=None):
+
+def instalar_dependencias(on_progress=None):
     """
-    Instala las dependencias del sistema y las dependencias de Python.
+    Instala solo las dependencias de sistema y de Python que faltan.
 
     Args:
-        progress_bar (ttk.Progressbar, optional): Indicador de progreso para mostrar durante la instalación. Defaults to None.
+        on_progress: callback opcional (porcentaje, texto) para actualizar la UI
+                     desde el hilo principal.
 
     Returns:
-        bool: True si la instalación se realiza correctamente, False si hay algún error durante la instalación.
+        tuple[bool, str | None]: (éxito, mensaje de error)
     """
-    total_dependencias = len(DEPENDENCIAS_SISTEMA) + 1  # +1 para incluir las dependencias de Python
+    def reportar(valor, texto=""):
+        if on_progress:
+            on_progress(valor, texto)
+
+    faltan_sistema = paquetes_sistema_faltantes()
+    try:
+        faltan_pip = paquetes_pip_faltantes()
+    except Exception as e:
+        return False, f"Error al comprobar dependencias de Python: {e}"
+
+    total = len(faltan_sistema) + (1 if faltan_pip else 0)
+    if total == 0:
+        reportar(100, "Nada pendiente de instalar")
+        return True, None
+
     progreso_actual = 0
     contrasena = obtener_contrasena()
 
-    for dependencia, metodo_instalacion in DEPENDENCIAS_SISTEMA.items():
+    for dependencia in faltan_sistema:
+        reportar(
+            int((progreso_actual / total) * 100),
+            f"Instalando {dependencia}...",
+        )
         try:
-            proceso_instalacion = subprocess.Popen(["sudo", "-S"] + metodo_instalacion, stdin=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            salida, error = proceso_instalacion.communicate(input=contrasena + "\n")
+            proceso_instalacion = subprocess.Popen(
+                ["sudo", "-S", "apt", "install", "-y", dependencia],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            _salida, error = proceso_instalacion.communicate(input=contrasena + "\n")
             if proceso_instalacion.returncode != 0:
-                if progress_bar:
-                    messagebox.showerror("Error de instalación", f"No se pudo instalar {dependencia}: {error}")
-                    sys.exit(1)
-                else:
-                    print(f"No se pudo instalar {dependencia}: {error}")
-                return False
-            
+                return False, f"No se pudo instalar {dependencia}: {error}"
             progreso_actual += 1
-            if progress_bar:
-                progreso = int((progreso_actual / total_dependencias) * 100)
-                progress_bar["value"] = progreso
-                progress_bar.update()
+            reportar(int((progreso_actual / total) * 100), f"{dependencia} instalado")
+        except Exception as e:
+            return False, f"No se pudo instalar {dependencia}: {e}"
+
+    if faltan_pip:
+        reportar(int((progreso_actual / total) * 100), "Instalando paquetes de Python...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install"] + faltan_pip)
+            progreso_actual += 1
+            reportar(int((progreso_actual / total) * 100), "Paquetes de Python instalados")
         except subprocess.CalledProcessError as e:
-            if progress_bar:
-                messagebox.showerror("Error de instalación", f"No se pudo instalar {dependencia}: {e}")
-            else:
-                print(f"No se pudo instalar {dependencia}: {e}")
-            return False
+            return False, f"No se pudieron instalar las dependencias de Python: {e}"
+        except Exception as e:
+            return False, f"Error general al instalar dependencias de Python: {e}"
 
-    try:
-        requirements_path = obtener_ruta_requirements()
-        with open(requirements_path, 'r') as req_file:
-            required_packages = {}
-            for line in req_file:
-                line = line.strip()
-                if '==' in line:
-                    pkg, version = line.split('==')
-                    required_packages[pkg] = version
-                else:
-                    required_packages[line] = None
-        
-        installed_packages = subprocess.check_output([sys.executable, '-m', 'pip', 'freeze'], universal_newlines=True)
-        installed_packages_dict = {pkg.split('==')[0].lower(): pkg.split('==')[1] if '==' in pkg else None for pkg in installed_packages.splitlines()}
-        
-        packages_to_install = [pkg if version is None else f"{pkg}=={version}" for pkg, version in required_packages.items() if pkg.lower() not in installed_packages_dict or (version is not None and installed_packages_dict[pkg.lower()] != version)]
-
-        if packages_to_install:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install'] + packages_to_install)
-
-            if progress_bar:
-                progreso_actual += 1
-                progreso = int((progreso_actual / total_dependencias) * 100)
-                progress_bar["value"] = progreso
-                progress_bar.update()
-            return True
-        else:
-            if progress_bar:
-                progreso_actual += 1
-                progreso = int((progreso_actual / total_dependencias) * 100)
-                progress_bar["value"] = progreso
-                progress_bar.update()
-            return True
-    except subprocess.CalledProcessError as e:
-        if progress_bar:
-            messagebox.showerror("Error de instalación", f"No se pudieron instalar las dependencias de Python: {e}")
-        else:
-            print(f"No se pudieron instalar las dependencias de Python: {e}")
-        return False
-    except Exception as e:
-        print(f"Error general al instalar dependencias de Python: {e}")
-        messagebox.showerror("Error", f"Error general al instalar dependencias de Python: {e}")
-        return False
+    reportar(100, "Instalación completada")
+    return True, None

@@ -1,8 +1,9 @@
 import os
 import subprocess
-import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+
+from PIL import Image, ImageTk
 
 import preferencias
 from cat_archivos import (
@@ -13,13 +14,22 @@ from cat_archivos import (
     cifrar_archivo,
     descifrar_archivo,
 )
+from cat_archivos_extra import PermisosArchivos, DispositivosBloque, ArchivosGrandes, HashArchivo
 from cat_diccionario import abrir_ventana_diccionario, cargar_contenido_html
-from cat_editorTexto import EditorTextos
+from cat_editorTexto import EditorTextos, carpeta_notas, listar_notas
 from cat_informacion import Informacion
 from cat_internet import RedTools, hacer_ping, reiniciar_tarjeta_red
-from cat_navegadores import InstalarNavegadores, LimpiadorNavegadores
-from cat_perfil import PerfilUsuario
-from cat_redLocal import doble_clic, encontrar_dispositivos_en_red
+from cat_red_extra import RedesWifi, EditorHosts, SelectorDns
+from cat_navegadores import (
+    InstalarNavegadores,
+    InstalarNavegadoresExtra,
+    LimpiadorNavegadores,
+    PerfilesNavegadores,
+    abrir_navegador,
+    _limpiar_directorio,
+)
+from cat_perfil import PerfilUsuario, crear_panel_perfil
+from cat_redLocal import doble_clic, encontrar_dispositivos_en_red, formatear_dispositivo
 from cat_sistema import (
     AdministrarProcesos,
     AplicacionBuscadorDuplicados,
@@ -34,7 +44,145 @@ from cat_sistema import (
     limpiar_cache,
     abrir_gestor_software,
 )
-from tooltip import ToolTip
+from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras
+from tooltip import ToolTip, con_tooltip
+from registro import confirmar, en_hilo, ventana_progreso, mostrar_registro, mostrar_historial_comandos, _widget_vivo
+from avisos import recoger_avisos
+
+COLORES_AVISO = {
+    "error": ("#c0392b", "white"),
+    "aviso": ("#e67e22", "white"),
+    "ok": ("#1e8449", "white"),
+    "info": ("#2471a3", "white"),
+}
+
+RUTA_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
+
+
+def _colocar_logo_inicio(self):
+    """Muestra el logo adaptado al espacio del área central."""
+    fondo = "black" if preferencias.tema_seleccionado != "Claro" else "lightgrey"
+    marco = tk.Frame(self.area_central, bg=fondo)
+    marco.pack(fill=tk.X, padx=16, pady=(12, 4))
+    etiqueta = tk.Label(marco, bg=fondo)
+    etiqueta.pack()
+
+    try:
+        original = Image.open(RUTA_LOGO)
+    except OSError:
+        etiqueta.config(text="Manten1d0", font=("Arial", 22, "bold"))
+        return
+
+    estado = {"ultimo": (0, 0)}
+
+    def ajustar(_event=None):
+        if not etiqueta.winfo_exists():
+            return
+        ancho = self.area_central.winfo_width()
+        alto = self.area_central.winfo_height()
+        if ancho < 80 or alto < 80:
+            return
+        max_w = max(180, ancho - 48)
+        max_h = max(90, min(int(alto * 0.38), 260))
+        if (max_w, max_h) == estado["ultimo"]:
+            return
+        estado["ultimo"] = (max_w, max_h)
+        imagen = original.copy()
+        resample = getattr(Image, "LANCZOS", Image.NEAREST)
+        imagen.thumbnail((max_w, max_h), resample)
+        foto = ImageTk.PhotoImage(imagen)
+        etiqueta.configure(image=foto)
+        etiqueta.image = foto
+        self._inicio_logo_tk = foto
+
+    def programar(_event=None):
+        pendiente = getattr(self, "_inicio_logo_after", None)
+        if pendiente:
+            try:
+                self.area_central.after_cancel(pendiente)
+            except tk.TclError:
+                pass
+        self._inicio_logo_after = self.area_central.after(80, ajustar)
+
+    self.area_central.bind("<Configure>", programar)
+    self.area_central.after(40, ajustar)
+
+
+def inicio_cat(self, mensaje_personalizado=None):
+    self.contenedor_texto.pack_forget()
+    for widget in self.area_central.winfo_children():
+        widget.destroy()
+
+    _colocar_logo_inicio(self)
+
+    titulo = tk.Label(
+        self.area_central,
+        text="Inicio",
+        font=("Arial", 16, "bold"),
+        bg="lightgrey",
+        padx=10,
+        pady=16,
+    )
+    titulo.pack()
+    canvas_linea = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
+    canvas_linea.create_line(0, 1, 500, 1, fill="black")
+    canvas_linea.pack(pady=8)
+
+    tk.Label(
+        self.area_central,
+        text="Estado del equipo. Pulsa un aviso para ir a la categoría relacionada.\nAtajos: Alt+1 Inicio, Alt+2 a Alt+0 el resto de categorías.",
+        bg="lightgrey",
+        font=("Arial", 10),
+        justify=tk.CENTER,
+    ).pack(pady=(0, 8))
+
+    marco_avisos = tk.Frame(self.area_central, bg="lightgrey")
+    marco_avisos.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+    etiqueta_carga = tk.Label(marco_avisos, text="Comprobando avisos...", bg="lightgrey")
+    etiqueta_carga.pack(pady=20)
+
+    def pintar(avisos):
+        if not _widget_vivo(marco_avisos):
+            return
+        for hijo in marco_avisos.winfo_children():
+            hijo.destroy()
+        for aviso in avisos:
+            fondo, frente = COLORES_AVISO.get(aviso["nivel"], COLORES_AVISO["info"])
+            destino = aviso.get("destino")
+            boton = tk.Button(
+                marco_avisos,
+                text=f"{aviso['titulo']}\n{aviso['detalle']}",
+                bg=fondo,
+                fg=frente,
+                justify=tk.LEFT,
+                anchor="w",
+                wraplength=480,
+                padx=12,
+                pady=8,
+                command=(lambda d=destino: self.mostrar_subcategorias(d)) if destino else None,
+            )
+            boton.pack(fill=tk.X, pady=5)
+            if destino:
+                ToolTip(boton, "Abre la categoría relacionada con este aviso")
+            else:
+                ToolTip(boton, aviso.get("detalle") or "Aviso informativo")
+        marco_botones = tk.Frame(marco_avisos, bg="lightgrey")
+        marco_botones.pack(pady=12)
+        con_tooltip(
+            tk.Button(marco_botones, text="Actualizar avisos", command=lambda: inicio_cat(self)),
+            "Vuelve a comprobar avisos de sistema, red y mantenimiento",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(marco_botones, text="Ver registro de acciones", command=lambda: mostrar_registro(self.root)),
+            "Muestra el historial de acciones realizadas en esta sesión y anteriores",
+        ).pack(side=tk.LEFT, padx=6)
+        if preferencias.tema_seleccionado != "Claro":
+            preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+
+    en_hilo(self.area_central, recoger_avisos, al_terminar=pintar)
+    if preferencias.tema_seleccionado != "Claro":
+        preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+
 
 def informacion_cat(self, mensaje_personalizado):
     """
@@ -61,7 +209,7 @@ Steps:
 
     # Ocultar todos los elementos en el área central
     for widget in self.area_central.winfo_children():
-        widget.pack_forget()
+        widget.destroy()
 
     # Mostrar el contenedor de texto para mostrar información
     self.contenedor_texto.pack(expand=True, fill="both", padx=10, pady=(20, 10))
@@ -89,24 +237,27 @@ Steps:
     # Mostrar la información del sistema
     self.mostrar_informacion_sistema()
 
+    marco_informe = tk.Frame(self.area_central, bg="lightgrey")
+    marco_informe.pack(pady=(6, 0))
+    con_tooltip(
+        tk.Button(marco_informe, text="Copiar informe", command=self.copiar_informe_sistema),
+        "Copia el informe del sistema al portapapeles",
+    ).pack(side=tk.LEFT, padx=6)
+    con_tooltip(
+        tk.Button(marco_informe, text="Exportar a .txt", command=self.exportar_informe_sistema),
+        "Guarda el informe del sistema en un archivo de texto",
+    ).pack(side=tk.LEFT, padx=6)
+    if preferencias.tema_seleccionado != "Claro":
+        preferencias.cambiar_tema(marco_informe, preferencias.tema_seleccionado)
+
     # Texto de información se muestre justo debajo de la línea
     self.texto_informacion.pack(expand=True, fill="both", padx=10, pady=(1, 30))  
 
     
 def diccionario_cat(self, mensaje_personalizado):
-    """
-    Muestra la pantalla de la categoría DICCIONARIO en la interfaz gráfica.
+    """Muestra la categoría Diccionario."""
 
-    Args:
-        self: La instancia de la clase que llama a la función.
-        mensaje_personalizado (str): Mensaje opcional que se mostrará en la interfaz.
-
-    Returns:
-        No retorna ningún valor.
-    """
-    
     def aplicar_tema(widget):
-        """Aplica el tema seleccionado a un widget si el tema no es 'Claro'."""
         if preferencias.tema_seleccionado != "Claro":
             preferencias.cambiar_tema(widget, preferencias.tema_seleccionado)
             if isinstance(widget, (tk.Label, tk.Button, tk.Entry, tk.Text, tk.Listbox)):
@@ -114,32 +265,34 @@ def diccionario_cat(self, mensaje_personalizado):
             else:
                 widget.config(bg="black")
 
-    # Ocultar todos los elementos en el área central
+    def abrir_diccionario():
+        contenido_html = cargar_contenido_html()
+        abrir_ventana_diccionario(contenido_html)
+
     self.contenedor_texto.pack_forget()
     for widget in self.area_central.winfo_children():
-        widget.pack_forget()
+        widget.destroy()
 
-    # Actualizar el mensaje personalizado si existe
     if mensaje_personalizado:
         label_subcategorias = tk.Label(
             self.area_central, text=mensaje_personalizado,
             font=("Arial", 16, "bold"), bg="lightgrey", padx=10, pady=20
         )
-        aplicar_tema(label_subcategorias)
-        label_subcategorias.pack()
+    else:
+        label_subcategorias = tk.Label(
+            self.area_central, text="DICCIONARIO", font=("Arial", 12, "bold"), bg="lightgrey"
+        )
+    aplicar_tema(label_subcategorias)
+    label_subcategorias.pack()
+    canvas_linea = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
+    canvas_linea.create_line(0, 1, 500, 1, fill="black")
+    canvas_linea.pack(pady=10)
 
-        # Dibujar una línea horizontal
-        canvas_linea = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
-        canvas_linea.create_line(0, 1, 500, 1, fill="black")
-        canvas_linea.pack(pady=10)
-    
+    boton_diccionario = tk.Button(self.area_central, text="Abrir diccionario GNU/Linux", command=abrir_diccionario)
+    aplicar_tema(boton_diccionario)
+    boton_diccionario.pack(pady=16)
+    ToolTip(boton_diccionario, "Consulta comandos GNU/Linux (hace falta Internet)")
     aplicar_tema(self.area_central)
-    
-    self.root.update_idletasks()  # Actualizar la interfaz gráfica antes de abrir la ventana del diccionario
-
-    # Cargar el contenido HTML
-    contenido_html = cargar_contenido_html()
-    abrir_ventana_diccionario(contenido_html)  # Abrir la ventana del diccionario después de actualizar la interfaz
 
 def sistema_cat(self, mensaje_personalizado):
     """
@@ -212,9 +365,14 @@ def sistema_cat(self, mensaje_personalizado):
     crear_boton(contenedor_botones, "Gestiona Repositorios", lambda: Repositorios(tk.Toplevel(self.area_central)), 2, 2, "Gestiona los repositorios del sistema")
 
     crear_boton(contenedor_botones, "Monitorizar", lambda: MonitorizarSistema(tk.Toplevel(self.area_central)).monitorizar_sistema(), 3, 0, "Genera un gráfico de los recursos del sistema en el momento actual")
-    crear_boton(contenedor_botones, "Instalar .deb", lambda: DebInstalador().seleccionar_archivo().instalar_deb(), 3, 1, "Selecciona e instala un paquete .deb usando dpkg")
+    crear_boton(contenedor_botones, "Instalar .deb", lambda: DebInstalador().ejecutar(self.root), 3, 1, "Selecciona e instala un paquete .deb usando dpkg")
     crear_boton(contenedor_botones, "Desinstalar Paquetes", lambda: DesinstalarPaquetes(tk.Toplevel(self.area_central)), 3, 2, "Desinstalar paquetes instalados por el usuario")
     crear_boton(contenedor_botones, "Ver logs", lambda: consultaLogs(tk.Toplevel(self.area_central)), 4, 0, "Consulta los registros más importantes del sistema")
+    crear_boton(contenedor_botones, "Limpieza disco", lambda: LimpiezaEspacio(tk.Toplevel(self.area_central)), 4, 1, "Analiza y libera espacio: caché APT, journal, miniaturas, papelera y snaps antiguos")
+    crear_boton(contenedor_botones, "Salud discos", lambda: SaludDiscos(tk.Toplevel(self.area_central)), 4, 2, "Consulta el estado SMART, temperatura y avisos de los discos")
+    crear_boton(contenedor_botones, "Servicios", lambda: ServiciosSystemd(tk.Toplevel(self.area_central)), 5, 0, "Inicia, detiene, habilita o deshabilita servicios systemd")
+    crear_boton(contenedor_botones, "Historial comandos", lambda: mostrar_historial_comandos(self.root), 5, 1, "Repite limpiezas y otras acciones ya ejecutadas desde la aplicación")
+    crear_boton(contenedor_botones, "Impresoras", lambda: Impresoras(tk.Toplevel(self.area_central)), 5, 2, "Busca impresoras USB o de la red local y las colas ya instaladas en CUPS")
     
 # Función para mostrar la categoría INTERNET
 def internet_cat(self, mensaje_personalizado, entry_url=None):
@@ -281,14 +439,7 @@ Steps:
     # Función para reiniciar la tarjeta de red seleccionada
     def reiniciar_tarjeta_seleccionada():
         interfaz_seleccionada = seleccion_interfaz.get()
-        
-        # Obtener las nuevas direcciones IP después de reiniciar la tarjeta de red
-        informacion = Informacion()
-        nueva_ip_local = informacion.obtener_direccion_ip_local()
-        nueva_ip_publica = informacion.obtener_direccion_ip_publica()
-
-        # Llamar a la función para reiniciar la tarjeta de red seleccionada
-        reiniciar_tarjeta_red(interfaz_seleccionada, nueva_ip_local, nueva_ip_publica)
+        reiniciar_tarjeta_red(interfaz_seleccionada, parent=self.root)
 
 
     # Botón para reiniciar la tarjeta de red seleccionada
@@ -315,24 +466,64 @@ Steps:
     self.canvas.create_line(0, 1, 500, 1, fill="black")
     self.canvas.pack(pady=10)
 
+    frame_extra_red = tk.Frame(self.area_central, bg="lightgrey")
+    frame_extra_red.pack(pady=6)
+    con_tooltip(
+        tk.Button(
+            frame_extra_red, text="Redes Wi-Fi", width=16,
+            command=lambda: RedesWifi(tk.Toplevel(self.root)),
+        ),
+        "Lista, conecta o desconecta redes Wi-Fi con nmcli",
+    ).pack(side=tk.LEFT, padx=5)
+    con_tooltip(
+        tk.Button(
+            frame_extra_red, text="DNS", width=16,
+            command=lambda: SelectorDns(tk.Toplevel(self.root)),
+        ),
+        "Cambia el DNS de la conexión activa (router, Cloudflare o Google)",
+    ).pack(side=tk.LEFT, padx=5)
+    con_tooltip(
+        tk.Button(
+            frame_extra_red, text="Hosts locales", width=16,
+            command=lambda: EditorHosts(tk.Toplevel(self.root)),
+        ),
+        "Edita /etc/hosts (se crea una copia de seguridad al guardar)",
+    ).pack(side=tk.LEFT, padx=5)
+
+    self.canvas = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
+    self.canvas.create_line(0, 1, 500, 1, fill="black")
+    self.canvas.pack(pady=10)
+
     # Instanciar la clase RedTools y establecer el área central
     red_tools = RedTools(self.root)
     red_tools.set_area_central(self.area_central)
 
-    # Botón para escanear puertos
-    boton_escanear_puertos = tk.Button(self.area_central, text="Escanear Puertos", width=20, command=lambda: red_tools.escanear_puertos())    
-    boton_escanear_puertos.pack(side=tk.LEFT, padx=10, pady=(0, 10), anchor="n")
+    frame_herramientas = tk.Frame(self.area_central, bg="lightgrey")
+    frame_herramientas.pack(pady=(0, 10))
+
+    boton_escanear_puertos = tk.Button(frame_herramientas, text="Escanear Puertos", width=16, command=lambda: red_tools.escanear_puertos())
+    boton_escanear_puertos.pack(side=tk.LEFT, padx=6)
     ToolTip(boton_escanear_puertos, "Escanea los puertos de una IP específica")
 
-    # Botón para test de velocidad de internet
-    boton_test_velocidad = tk.Button(self.area_central, text="Test Velocidad", width=20, command=red_tools.test_velocidad)
-    boton_test_velocidad.pack(side=tk.LEFT, padx=10, pady=(0, 10), anchor="n")
+    boton_test_velocidad = tk.Button(frame_herramientas, text="Test Velocidad", width=16, command=red_tools.test_velocidad)
+    boton_test_velocidad.pack(side=tk.LEFT, padx=6)
     ToolTip(boton_test_velocidad, "Mide la velocidad de descarga y carga de la conexión a Internet")
 
-    # Botón para diagnóstico de red
-    boton_diagnostico_red = tk.Button(self.area_central, text="Diagnóstico Red", width=20, command=red_tools.diagnostico_red)
-    boton_diagnostico_red.pack(side=tk.LEFT, padx=10, pady=(0, 10), anchor="n")
+    boton_diagnostico_red = tk.Button(frame_herramientas, text="Diagnóstico Red", width=16, command=red_tools.diagnostico_red)
+    boton_diagnostico_red.pack(side=tk.LEFT, padx=6)
     ToolTip(boton_diagnostico_red, "Diagnostica problemas de conectividad de red con traceroute y netstat")
+
+    boton_ruido = tk.Button(
+        frame_herramientas,
+        text="Nivel de ruido",
+        width=16,
+        command=lambda: red_tools.nivel_ruido(seleccion_interfaz.get()),
+    )
+    boton_ruido.pack(side=tk.LEFT, padx=6)
+    ToolTip(
+        boton_ruido,
+        "Mide el ruido de radio del Wi-Fi (SNR) y el jitter/pérdida de paquetes hacia Internet",
+    )
 
 
 # Función para mostrar la pantalla de la categoría RED LOCAL
@@ -403,43 +594,49 @@ Steps:
             self.aviso_samba.destroy()
             del self.aviso_samba
 
-        # Mostrar mensaje temporal "Buscando equipos"
-        self.mensaje_busqueda = tk.Label(self.area_central, text="Buscando equipos...")
+        self.mensaje_busqueda = tk.Label(self.area_central, text="Buscando equipos en la red local...")
         self.mensaje_busqueda.pack()
-        # Aplicar el tema seleccionado a la nueva ventana
         preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
-        self.area_central.update()  # Actualizar la interfaz gráfica para mostrar el mensaje
-        time.sleep(4)
-        self.mensaje_busqueda.pack_forget()
 
-        # Agregar el texto "Dispositivos en la red local:"
-        self.label_dispositivos = tk.Label(self.area_central, text="Dispositivos encontrados en la red local:", font=("Arial", 12, "bold"))
-        self.label_dispositivos.pack()
+        def mostrar(dispositivos):
+            if not _widget_vivo(getattr(self, "mensaje_busqueda", None)):
+                return
+            self.mensaje_busqueda.pack_forget()
+            self.mensaje_busqueda.destroy()
+            del self.mensaje_busqueda
 
-        dispositivos = encontrar_dispositivos_en_red()
+            self.label_dispositivos = tk.Label(
+                self.area_central,
+                text="Dispositivos encontrados en la red local:",
+                font=("Arial", 12, "bold"),
+            )
+            self.label_dispositivos.pack()
 
-        if dispositivos:
-            # Crear lista de dispositivos
-            self.lista_dispositivos = tk.Listbox(self.area_central, width=50, height=10)
-            self.lista_dispositivos.pack()
+            if dispositivos:
+                self.lista_dispositivos = tk.Listbox(self.area_central, width=88, height=12, font=("monospace", 9))
+                self.lista_dispositivos.pack(padx=10)
+                self.lista_dispositivos.dispositivos = dispositivos
+                for dispositivo in dispositivos:
+                    if isinstance(dispositivo, dict):
+                        self.lista_dispositivos.insert(tk.END, formatear_dispositivo(dispositivo))
+                    else:
+                        self.lista_dispositivos.insert(tk.END, dispositivo)
+                self.lista_dispositivos.bind(
+                    "<Double-1>", lambda event: doble_clic(event, self.lista_dispositivos)
+                )
+            else:
+                messagebox.showinfo("Buscar Equipos", "No se encontraron dispositivos en la red local.")
 
-            # Insertar dispositivos en la lista
-            for dispositivo in dispositivos:
-                self.lista_dispositivos.insert(tk.END, dispositivo)
-
+            self.aviso_samba = tk.Label(
+                self.area_central,
+                text="IP, nombre, MAC y si comparte Samba. Doble clic abre smb:// si está disponible.",
+                font=("Arial", 8),
+            )
+            self.aviso_samba.pack()
             boton_buscar.config(state="normal")
+            preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
-            # Vincular función de doble clic
-            self.lista_dispositivos.bind("<Double-1>", lambda event: doble_clic(event, self.lista_dispositivos))
-        else:
-            # No se encontraron dispositivos
-            messagebox.showinfo("Buscar Equipos", "No se encontraron dispositivos en la red local.")
-
-        # Aviso de conexión con Samba
-        self.aviso_samba = tk.Label(self.area_central, text="Haz doble clic para establecer una conexión con Samba. Si es posible.", font=("Arial", 8))
-        self.aviso_samba.pack()
-        # Aplicar el tema seleccionado a la nueva ventana
-        preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+        en_hilo(self.area_central, encontrar_dispositivos_en_red, al_terminar=mostrar)
 
     # Crear el botón para buscar equipos en la red local
     boton_buscar = tk.Button(self.area_central, text="Buscar Equipos en Red Local", command=buscar_equipos_red_local)
@@ -641,6 +838,87 @@ Steps:
     boton_edge_historial = tk.Button(frame_botones_historial, text="Limpiar Historial Edge", command=LimpiadorNavegadores.limpiar_historial_edge)
     boton_edge_historial.pack(side="left", padx=5, pady=10)
     ToolTip(boton_edge_historial, "Limpia el historial de Edge (si está instalado)")
+
+    self.canvas = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
+    self.canvas.create_line(0, 1, 500, 1, fill="black")
+    self.canvas.pack(pady=10)
+
+    def abrir_chromium(privado=False):
+        extra = ["--incognito"] if privado else []
+        for binario in ("chromium-browser", "chromium"):
+            if os.path.exists(f"/usr/bin/{binario}"):
+                abrir_navegador([binario, *extra], "Chromium")
+                return
+        abrir_navegador(["chromium-browser", *extra], "Chromium")
+
+    frame_otros = tk.Frame(self.area_central)
+    frame_otros.pack(pady=4)
+    con_tooltip(
+        tk.Button(frame_otros, text="Abrir Brave", command=lambda: abrir_navegador(["brave-browser"], "Brave")),
+        "Abre Brave si está instalado",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_otros, text="Abrir Chromium", command=lambda: abrir_chromium()),
+        "Abre Chromium si está instalado",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_otros, text="Abrir Vivaldi", command=lambda: abrir_navegador(["vivaldi"], "Vivaldi")),
+        "Abre Vivaldi si está instalado",
+    ).pack(side="left", padx=5)
+
+    frame_otros_priv = tk.Frame(self.area_central)
+    frame_otros_priv.pack(pady=4)
+    con_tooltip(
+        tk.Button(frame_otros_priv, text="Brave privado", command=lambda: abrir_navegador(["brave-browser", "--incognito"], "Brave")),
+        "Abre Brave en modo privado",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_otros_priv, text="Chromium privado", command=lambda: abrir_chromium(True)),
+        "Abre Chromium en modo incógnito",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_otros_priv, text="Vivaldi privado", command=lambda: abrir_navegador(["vivaldi", "--incognito"], "Vivaldi")),
+        "Abre Vivaldi en modo privado",
+    ).pack(side="left", padx=5)
+
+    frame_inst_extra = tk.Frame(self.area_central)
+    frame_inst_extra.pack(pady=4)
+    con_tooltip(
+        tk.Button(frame_inst_extra, text="Instalar Brave", command=lambda: InstalarNavegadoresExtra.instalar_brave(self.root)),
+        "Instala Brave desde su repositorio oficial",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_inst_extra, text="Instalar Chromium", command=lambda: InstalarNavegadoresExtra.instalar_chromium(self.root)),
+        "Instala Chromium desde los repositorios de Ubuntu",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_inst_extra, text="Instalar Vivaldi", command=lambda: InstalarNavegadoresExtra.instalar_vivaldi(self.root)),
+        "Instala Vivaldi desde su repositorio oficial",
+    ).pack(side="left", padx=5)
+
+    frame_cache_extra = tk.Frame(self.area_central)
+    frame_cache_extra.pack(pady=4)
+    con_tooltip(
+        tk.Button(frame_cache_extra, text="Caché Brave", command=lambda: _limpiar_directorio("~/.cache/BraveSoftware", "Brave")),
+        "Borra la caché de Brave (si está instalado)",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_cache_extra, text="Caché Chromium", command=lambda: _limpiar_directorio("~/.cache/chromium", "Chromium")),
+        "Borra la caché de Chromium (si está instalado)",
+    ).pack(side="left", padx=5)
+    con_tooltip(
+        tk.Button(frame_cache_extra, text="Caché Vivaldi", command=lambda: _limpiar_directorio("~/.cache/vivaldi", "Vivaldi")),
+        "Borra la caché de Vivaldi (si está instalado)",
+    ).pack(side="left", padx=5)
+
+    con_tooltip(
+        tk.Button(
+            self.area_central,
+            text="Perfiles y marcadores",
+            command=lambda: PerfilesNavegadores(tk.Toplevel(self.root)),
+        ),
+        "Lista perfiles de navegador y exporta marcadores a HTML",
+    ).pack(pady=8)
     
 def archivos_cat(self, mensaje_personalizado):
     """
@@ -701,14 +979,22 @@ def archivos_cat(self, mensaje_personalizado):
             return
         # Verificar que se hayan seleccionado el origen y el destino
         if origen and destino:
-            # Crear una instancia de la clase CopiaSeguridad y realizar la copia de seguridad
-            copia_seguridad = CopiaSeguridad(origen, destino)
-            if copia_seguridad.realizar_copia_seguridad():
-                # Mostrar mensaje de éxito al usuario
+            if not confirmar(
+                f"¿Crear una copia de seguridad de\n{origen}\nen\n{destino}?",
+                self.root,
+            ):
+                return
+            progreso, _et = ventana_progreso(self.root, "Copia de seguridad", "Creando archivo .gz...")
+
+            def trabajador():
+                return CopiaSeguridad(origen, destino).realizar_copia_seguridad()
+
+            def terminar(_ok):
+                if progreso.winfo_exists():
+                    progreso.destroy()
                 messagebox.showinfo("Copia de seguridad", "Copia de seguridad realizada con éxito.")
-            else:
-                # Mostrar mensaje de error al usuario
-                messagebox.showerror("Error", "Error al realizar la copia de seguridad.")
+
+            en_hilo(self.root, trabajador, al_terminar=terminar)
         else:
             # Mostrar mensaje de advertencia si falta alguna ruta
             messagebox.showwarning("Advertencia", "Por favor, seleccione el directorio de origen y destino.")
@@ -737,14 +1023,22 @@ def archivos_cat(self, mensaje_personalizado):
         
         # Verificar que se hayan seleccionado el origen y el destino
         if origen and destino:
-            # Crear una instancia de la clase RestaurarCopiaSeguridad y restaurar la copia de seguridad
-            restaurar = RestaurarCopiaSeguridad(origen, destino)
-            if restaurar.restaurar_copia_seguridad():
-                # Mostrar mensaje de éxito al usuario
+            if not confirmar(
+                f"¿Restaurar la copia\n{origen}\nen\n{destino}?\nSe pueden sobrescribir archivos.",
+                self.root,
+            ):
+                return
+            progreso, _et = ventana_progreso(self.root, "Restaurar copia", "Extrayendo archivo .gz...")
+
+            def trabajador():
+                return RestaurarCopiaSeguridad(origen, destino).restaurar_copia_seguridad()
+
+            def terminar(_ok):
+                if progreso.winfo_exists():
+                    progreso.destroy()
                 messagebox.showinfo("Restaurar Copia de Seguridad", "Copia de seguridad restaurada con éxito.")
-            else:
-                # Mostrar mensaje de error al usuario
-                messagebox.showerror("Error", "Se ha producido un Error al restaurar la copia de seguridad.")
+
+            en_hilo(self.root, trabajador, al_terminar=terminar)
         else:
             # Mostrar mensaje de advertencia si falta alguna ruta
             messagebox.showwarning("Advertencia", "Por favor, seleccione el directorio de origen y destino.")
@@ -809,6 +1103,32 @@ def archivos_cat(self, mensaje_personalizado):
     boton_renombrado = tk.Button(frame_botones_archivos, text="Renombrar archivos", width=20, command=abrir_ventana_renombrado)
     boton_renombrado.pack(side=tk.LEFT, padx=5, pady=5)
     ToolTip(boton_renombrado, "Renombrar archivos de forma masiva")
+
+    self.canvas = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
+    self.canvas.create_line(0, 1, 500, 1, fill="black")
+    self.canvas.pack(pady=10)
+
+    frame_extra = tk.Frame(self.area_central)
+    frame_extra.pack()
+    con_tooltip(
+        tk.Button(frame_extra, text="Permisos / propietario", width=22, command=lambda: PermisosArchivos(tk.Toplevel(self.root))),
+        "Cambia permisos (chmod) y propietario (chown) de un archivo o carpeta",
+    ).pack(side=tk.LEFT, padx=5, pady=5)
+    con_tooltip(
+        tk.Button(frame_extra, text="USB / discos", width=16, command=lambda: DispositivosBloque(tk.Toplevel(self.root))),
+        "Monta o desmonta USB y otros discos de bloque",
+    ).pack(side=tk.LEFT, padx=5, pady=5)
+
+    frame_extra2 = tk.Frame(self.area_central)
+    frame_extra2.pack()
+    con_tooltip(
+        tk.Button(frame_extra2, text="Archivos grandes", width=20, command=lambda: ArchivosGrandes(tk.Toplevel(self.root))),
+        "Busca ISO, archivos grandes y descargas antiguas para liberar espacio",
+    ).pack(side=tk.LEFT, padx=5, pady=5)
+    con_tooltip(
+        tk.Button(frame_extra2, text="Hash MD5/SHA", width=16, command=lambda: HashArchivo(tk.Toplevel(self.root))),
+        "Calcula MD5, SHA-1 y SHA-256 para comprobar una descarga",
+    ).pack(side=tk.LEFT, padx=5, pady=5)
     
 def perfil_cat(self, mensaje_personalizado):
     """
@@ -866,16 +1186,22 @@ def perfil_cat(self, mensaje_personalizado):
     else:
         crear_label_y_linea("PERFIL USUARIO", 12, 0)
 
+    fondo = "black" if preferencias.tema_seleccionado != "Claro" else "lightgrey"
+    panel_perfil, foto_perfil = crear_panel_perfil(self.area_central, fondo=fondo)
+    self._perfil_foto_tk = foto_perfil
+    aplicar_tema(panel_perfil)
+    panel_perfil.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+
     # Crear un frame para los botones relacionados con el perfil de usuario
     frame_botones_perfil = tk.Frame(self.area_central, bg="lightgrey")
     aplicar_tema(frame_botones_perfil)
-    frame_botones_perfil.pack()
+    frame_botones_perfil.pack(pady=(0, 12))
 
     # Crear el botón para abrir la ventana desde la que modificar el perfil de usuario
-    boton_perfil = tk.Button(frame_botones_perfil, text="Modificar Perfil Usuario", width=20, command=abrir_ventana_perfil)
+    boton_perfil = tk.Button(frame_botones_perfil, text="Modificar Perfil Usuario", width=24, command=abrir_ventana_perfil)
     aplicar_tema(boton_perfil)
     boton_perfil.pack(side=tk.LEFT, padx=5, pady=5)
-    ToolTip(boton_perfil, "Modifica tu perfil de usuario")
+    ToolTip(boton_perfil, "Modifica el nombre, la imagen o la contraseña")
     
 def notas_cat(self, mensaje_personalizado):
     """
@@ -916,9 +1242,27 @@ def notas_cat(self, mensaje_personalizado):
         aplicar_tema(canvas_linea)
         canvas_linea.pack(pady=10)
 
-    def abrir_ventana_toma_notas():
+    def abrir_ventana_toma_notas(ruta=None):
         ventana_notas = tk.Toplevel(self.area_central)
-        toma_notas = EditorTextos(ventana_notas)
+        EditorTextos(ventana_notas, ruta_inicial=ruta)
+
+    def abrir_seleccionada():
+        notas = getattr(lista, "notas", [])
+        seleccion = lista.curselection()
+        if not notas or not seleccion:
+            messagebox.showinfo("Notas", "Selecciona una nota de la lista.")
+            return
+        abrir_ventana_toma_notas(notas[seleccion[0]][1])
+
+    def rellenar_notas():
+        lista.delete(0, tk.END)
+        notas = listar_notas()
+        lista.notas = notas
+        if not notas:
+            lista.insert(tk.END, "Todavía no hay notas en la carpeta del usuario.")
+            return
+        for _mtime, _ruta, nombre in notas:
+            lista.insert(tk.END, nombre)
 
     # Limpiar el área central
     self.contenedor_texto.pack_forget()
@@ -931,14 +1275,46 @@ def notas_cat(self, mensaje_personalizado):
     else:
         crear_label_y_linea("TOMA NOTAS", 12, 0)
 
-    # Crear un frame para los botones
-    frame_botones_notas = tk.Frame(self.area_central)
+    tk.Label(
+        self.area_central,
+        text=f"Carpeta: {carpeta_notas()}",
+        bg="lightgrey",
+        font=("Arial", 9),
+    ).pack(pady=(0, 6))
+
+    frame_botones_notas = tk.Frame(self.area_central, bg="lightgrey")
     aplicar_tema(frame_botones_notas)
     frame_botones_notas.pack()
 
-    # Botón para abrir la ventana para la toma de notas
-    boton_tomar_notas = tk.Button(frame_botones_notas, text="Abrir Editor Texto", command=abrir_ventana_toma_notas)
+    boton_tomar_notas = tk.Button(
+        frame_botones_notas,
+        text="Nueva nota",
+        command=lambda: abrir_ventana_toma_notas(),
+    )
     aplicar_tema(boton_tomar_notas)
-    boton_tomar_notas.pack(padx=10, pady=10)
-    ToolTip(boton_tomar_notas, "Abrir el Editor de Texto para tomar Notas")
+    boton_tomar_notas.pack(side=tk.LEFT, padx=6, pady=8)
+    ToolTip(boton_tomar_notas, "Crea una nota. Se guarda en la carpeta fija del usuario")
+
+    boton_abrir = tk.Button(frame_botones_notas, text="Abrir seleccionada", command=abrir_seleccionada)
+    aplicar_tema(boton_abrir)
+    boton_abrir.pack(side=tk.LEFT, padx=6, pady=8)
+    ToolTip(boton_abrir, "Abre la nota seleccionada en el editor")
+
+    boton_actualizar = tk.Button(frame_botones_notas, text="Actualizar lista", command=rellenar_notas)
+    aplicar_tema(boton_actualizar)
+    boton_actualizar.pack(side=tk.LEFT, padx=6, pady=8)
+    ToolTip(boton_actualizar, "Vuelve a leer las notas de la carpeta fija del usuario")
+
+    tk.Label(
+        self.area_central,
+        text="Últimas notas",
+        bg="lightgrey",
+        font=("Arial", 11, "bold"),
+    ).pack(pady=(8, 4))
+    lista = tk.Listbox(self.area_central, height=12)
+    lista.pack(fill=tk.BOTH, expand=True, padx=20, pady=6)
+    lista.bind("<Double-Button-1>", lambda _e: abrir_seleccionada())
+    lista.notas = []
+    aplicar_tema(lista)
+    rellenar_notas()
     

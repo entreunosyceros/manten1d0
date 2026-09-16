@@ -14,16 +14,144 @@ Módulos Importados:
 - tooltip: Proporciona una clase para mostrar tooltips en widgets de tkinter.
 """
 
-import tkinter as tk
-from tkinter import messagebox, filedialog, simpledialog
-from PIL import Image, ImageTk
+import grp
 import os
+import pwd
+import shutil
+import tkinter as tk
 from subprocess import Popen, PIPE
 import subprocess
 import getpass
+from tkinter import messagebox, filedialog
+from PIL import Image, ImageTk
+
 from password import limpiar_archivos_configuracion, obtener_contrasena
 from tooltip import ToolTip
 
+
+def datos_perfil_actual():
+    """Obtiene los datos visibles del usuario actual sin pedir sudo."""
+    usuario = getpass.getuser()
+    datos = {
+        "usuario": usuario,
+        "nombre": usuario,
+        "uid": "",
+        "home": os.path.expanduser("~"),
+        "shell": "",
+        "grupos": "",
+        "imagen": None,
+    }
+    try:
+        cuenta = pwd.getpwnam(usuario)
+    except KeyError:
+        return datos
+
+    nombre = (cuenta.pw_gecos.split(",")[0] or "").strip()
+    datos["nombre"] = nombre or usuario
+    datos["uid"] = str(cuenta.pw_uid)
+    datos["home"] = cuenta.pw_dir
+    datos["shell"] = cuenta.pw_shell
+
+    grupos = set()
+    try:
+        grupos.add(grp.getgrgid(cuenta.pw_gid).gr_name)
+    except KeyError:
+        pass
+    for grupo in grp.getgrall():
+        if usuario in grupo.gr_mem:
+            grupos.add(grupo.gr_name)
+    datos["grupos"] = ", ".join(sorted(grupos))
+
+    candidatos = [
+        os.path.join(cuenta.pw_dir, ".face"),
+        os.path.join(cuenta.pw_dir, ".face.icon"),
+        f"/var/lib/AccountsService/icons/{usuario}",
+    ]
+    accounts = f"/var/lib/AccountsService/users/{usuario}"
+    if os.access(accounts, os.R_OK):
+        try:
+            with open(accounts, encoding="utf-8") as archivo:
+                for linea in archivo:
+                    if linea.startswith("Icon="):
+                        ruta_icono = linea.split("=", 1)[1].strip()
+                        if ruta_icono:
+                            candidatos.insert(0, ruta_icono)
+                        break
+        except OSError:
+            pass
+
+    for ruta in candidatos:
+        if ruta and os.path.isfile(ruta) and os.access(ruta, os.R_OK):
+            datos["imagen"] = ruta
+            break
+    return datos
+
+
+def _foto_perfil(ruta, tamano=(120, 120)):
+    imagen = Image.open(ruta)
+    imagen.thumbnail(tamano)
+    return ImageTk.PhotoImage(imagen)
+
+
+def crear_panel_perfil(parent, fondo="lightgrey"):
+    """Muestra en un marco los datos actuales del perfil que se pueden consultar o cambiar."""
+    datos = datos_perfil_actual()
+    marco = tk.Frame(parent, bg=fondo)
+    tarjeta = tk.Frame(marco, bg=fondo)
+    tarjeta.pack(pady=8)
+
+    columna_foto = tk.Frame(tarjeta, bg=fondo)
+    columna_foto.pack(side=tk.LEFT, padx=(0, 16), anchor="n")
+    etiqueta_foto = tk.Label(columna_foto, bg=fondo)
+    etiqueta_foto.pack()
+    foto = None
+    if datos["imagen"]:
+        try:
+            foto = _foto_perfil(datos["imagen"])
+            etiqueta_foto.configure(image=foto)
+            etiqueta_foto.image = foto
+        except OSError:
+            etiqueta_foto.configure(text="Sin imagen")
+    else:
+        etiqueta_foto.configure(text="Sin imagen de perfil", font=("Arial", 9))
+
+    columna_datos = tk.Frame(tarjeta, bg=fondo)
+    columna_datos.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    filas = (
+        ("Usuario", datos["usuario"]),
+        ("Nombre", datos["nombre"]),
+        ("Carpeta personal", datos["home"]),
+        ("Intérprete", datos["shell"]),
+        ("Grupos", datos["grupos"] or "—"),
+    )
+    for etiqueta, valor in filas:
+        fila = tk.Frame(columna_datos, bg=fondo)
+        fila.pack(fill=tk.X, pady=2)
+        tk.Label(
+            fila,
+            text=f"{etiqueta}:",
+            width=16,
+            anchor="e",
+            bg=fondo,
+            font=("Arial", 10, "bold"),
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            fila,
+            text=valor or "—",
+            anchor="w",
+            bg=fondo,
+            wraplength=360,
+            justify=tk.LEFT,
+        ).pack(side=tk.LEFT, padx=8)
+
+    tk.Label(
+        marco,
+        text="Se puede modificar el nombre, la imagen de perfil y la contraseña.",
+        bg=fondo,
+        font=("Arial", 9),
+        justify=tk.CENTER,
+    ).pack(pady=(8, 0))
+    return marco, foto
 
 
 class PerfilUsuario:
@@ -38,28 +166,27 @@ class PerfilUsuario:
         self.root.title("Modificar Perfil de Usuario en el Sistema Operativo")
         self.root.geometry("400x600")
 
-        # Etiqueta y entrada para el nombre
+        datos = datos_perfil_actual()
+        tk.Label(root, text=f"Usuario: {datos['usuario']}").pack()
         tk.Label(root, text="* Nombre:").pack()
-        self.entry_nombre = tk.Entry(root)
+        self.entry_nombre = tk.Entry(root, width=36)
         self.entry_nombre.pack()
-        ToolTip(self.entry_nombre, "Escribe tu Nombre de Usuario")
+        ToolTip(self.entry_nombre, "Nombre visible del usuario (se puede modificar)")
 
         # Dibujar una línea horizontal
         self.canvas = tk.Canvas(root, width=200, height=2, bg="lightgrey", highlightthickness=0)
         self.canvas.create_line(0, 1, 500, 1, fill="silver")
         self.canvas.pack(pady=10)
 
-        # Etiqueta y entrada para la contraseña
-        tk.Label(root, text="* Contraseña:").pack()
-        self.entry_password = tk.Entry(root, show="*")
+        tk.Label(root, text="Contraseña (vacío = no cambiar):").pack()
+        self.entry_password = tk.Entry(root, show="*", width=36)
         self.entry_password.pack()
-        ToolTip(self.entry_password, "Escribe/Modifica la Contraseña para tu Usuario")
+        ToolTip(self.entry_password, "Déjala vacía para conservar la contraseña actual")
 
-        # Etiqueta y entrada para la confirmación de la contraseña
-        tk.Label(root, text="* Confirmar Contraseña:").pack()
-        self.entry_confirm_password = tk.Entry(root, show="*")
+        tk.Label(root, text="Confirmar contraseña:").pack()
+        self.entry_confirm_password = tk.Entry(root, show="*", width=36)
         self.entry_confirm_password.pack()
-        ToolTip(self.entry_confirm_password, "Confirma la Contraseña para tu Usuario")
+        ToolTip(self.entry_confirm_password, "Repite la contraseña solo si quieres cambiarla")
 
         # Botón para mostrar/ocultar contraseña
         self.boton_mostrar_contrasena = tk.Button(root, text="Mostrar", command=self.mostrar_ocultar_contrasena)
@@ -74,12 +201,11 @@ class PerfilUsuario:
         # Botón para elegir una imagen de perfil
         self.seleccion_imagen = tk.Button(root, text="Seleccionar Imagen de Perfil", command=self.seleccionar_imagen)
         self.seleccion_imagen.pack(pady=5)
-        ToolTip(self.seleccion_imagen, "Guardar Perfil de Usuario con los Datos Introducidos")
-        
-        # Previsualización de la imagen de perfil
-        self.label_imagen = tk.Label(root)
+        ToolTip(self.seleccion_imagen, "Elige una imagen para el perfil de usuario")
+
+        self.label_imagen = tk.Label(root, text="Sin imagen de perfil")
         self.label_imagen.pack(pady=10)
-        ToolTip(self.label_imagen, "Previsualización de la Imagen de Usuario")
+        ToolTip(self.label_imagen, "Imagen actual del perfil de usuario")
 
         # Dibujar una línea horizontal
         self.canvas = tk.Canvas(root, width=200, height=2, bg="lightgrey", highlightthickness=0)
@@ -143,89 +269,101 @@ class PerfilUsuario:
             ruta_imagen (str): La ruta del archivo de imagen seleccionado.
         """
         try:
-            imagen = Image.open(ruta_imagen)
-            imagen.thumbnail((100, 100))
-            self.imagen_tk = ImageTk.PhotoImage(imagen)  # Asignar la imagen a una variable de instancia
-            self.label_imagen.config(image=self.imagen_tk)
+            self.imagen_tk = _foto_perfil(ruta_imagen, (100, 100))
+            self.label_imagen.config(image=self.imagen_tk, text="")
             self.label_imagen.image = self.imagen_tk
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo cargar la imagen de perfil: {e}")
 
     def cargar_datos_usuario(self):
-        """Carga los datos actuales del usuario, incluyendo el nombre y la imagen de perfil."""
-        try:
-            username = getpass.getuser()
-            # Obtener el nombre completo usando `getent`
-            result = subprocess.run(['getent', 'passwd', username], capture_output=True, text=True, check=True)
-            user_info = result.stdout.strip().split(':')
-            nombre_completo = user_info[4].split(',')[0]  # GECOS field
+        """Rellena el formulario con el nombre e imagen actuales, sin pedir sudo."""
+        datos = datos_perfil_actual()
+        self.entry_nombre.delete(0, tk.END)
+        self.entry_nombre.insert(0, datos["nombre"])
+        if datos["imagen"]:
+            self.mostrar_previsualizacion_imagen(datos["imagen"])
 
-            self.entry_nombre.insert(0, nombre_completo)
-
-            # Cargar la imagen de perfil actual con sudo
-            contrasena_sudo = obtener_contrasena()
-            face_file = f'/var/lib/AccountsService/icons/{username}'
-            user_accounts_file = f'/var/lib/AccountsService/users/{username}'
-
-            # Intentar obtener el icono del archivo de usuario
-            result = subprocess.run(
-                ['sudo', '-S', 'cat', user_accounts_file],
-                input=f"{contrasena_sudo}\n",
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                lines = result.stdout.splitlines()
-                for line in lines:
-                    if line.startswith('Icon='):
-                        face_file = line.split('=')[1].strip()
-                        break
-
-            # Mostrar la imagen de perfil actual
-            if os.path.exists(face_file):
-                self.mostrar_previsualizacion_imagen(face_file)
-            else:
-                messagebox.showwarning("Advertencia", "No se encontró ninguna imagen de perfil actual.")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudieron cargar los datos del usuario: {e}")
+    def _guardar_imagen_perfil(self, usuario, contrasena_sudo):
+        if not self.imagen_perfil:
+            return
+        destino_home = os.path.join(os.path.expanduser("~"), ".face")
+        shutil.copy2(self.imagen_perfil, destino_home)
+        destino_cuenta = f"/var/lib/AccountsService/icons/{usuario}"
+        subprocess.run(
+            ["sudo", "-S", "cp", self.imagen_perfil, destino_cuenta],
+            input=f"{contrasena_sudo}\n",
+            text=True,
+            check=False,
+        )
+        subprocess.run(
+            ["sudo", "-S", "chmod", "644", destino_cuenta],
+            input=f"{contrasena_sudo}\n",
+            text=True,
+            check=False,
+        )
 
     def guardar_perfil(self):
         """Guarda los cambios en el perfil del usuario, incluyendo el nombre y la contraseña."""
-        nombre = self.entry_nombre.get()
+        nombre = self.entry_nombre.get().strip()
         password = self.entry_password.get()
         confirm_password = self.entry_confirm_password.get()
+        usuario = getpass.getuser()
 
-        # Validar la entrada
-        if not nombre or not password or not confirm_password:
-            messagebox.showerror("Error", "Todos los campos con * son obligatorios.")
+        if not nombre:
+            messagebox.showerror("Error", "El nombre es obligatorio.")
             return
 
-        if password != confirm_password:
-            messagebox.showerror("Error", "Las contraseñas no coinciden.")
-            return
+        if password or confirm_password:
+            if password != confirm_password:
+                messagebox.showerror("Error", "Las contraseñas no coinciden.")
+                return
+            if not password:
+                messagebox.showerror("Error", "La contraseña no puede estar vacía si quieres cambiarla.")
+                return
 
-        # Obtener la contraseña de sudo
         contrasena_sudo = obtener_contrasena()
+        if not contrasena_sudo:
+            return
 
         try:
-            # Actualizar el nombre completo
-            subprocess.run(['sudo', '-S', 'usermod', '-c', nombre, getpass.getuser()], input=f"{contrasena_sudo}\n", text=True, check=True)
+            subprocess.run(
+                ["sudo", "-S", "usermod", "-c", nombre, usuario],
+                input=f"{contrasena_sudo}\n",
+                text=True,
+                check=True,
+                capture_output=True,
+            )
+            self._guardar_imagen_perfil(usuario, contrasena_sudo)
 
-            # Cambiar la contraseña usando chpasswd
-            passwd_input = f"{getpass.getuser()}:{password}"
-            process = Popen(['sudo', 'chpasswd'], stdin=PIPE, stdout=PIPE, stderr=PIPE, text=True)
-            stdout, stderr = process.communicate(input=f"{passwd_input}\n")
-            if process.returncode != 0:
-                raise subprocess.CalledProcessError(process.returncode, 'chpasswd', output=stdout, stderr=stderr)
+            if password:
+                process = Popen(
+                    ["sudo", "-S", "chpasswd"],
+                    stdin=PIPE,
+                    stdout=PIPE,
+                    stderr=PIPE,
+                    text=True,
+                )
+                stdout, stderr = process.communicate(input=f"{contrasena_sudo}\n{usuario}:{password}\n")
+                if process.returncode != 0:
+                    raise subprocess.CalledProcessError(process.returncode, "chpasswd", output=stdout, stderr=stderr)
 
-            # Preguntar al usuario si desea reiniciar la sesión para aplicar los cambios
-            reiniciar_sesion = messagebox.askyesno("Reiniciar Sesión", "¿Quieres reiniciar la sesión para aplicar los cambios?")
+            messagebox.showinfo("Perfil", "Los datos del perfil se han actualizado.")
+            reiniciar_sesion = messagebox.askyesno(
+                "Reiniciar sesión",
+                "¿Quieres reiniciar la sesión para aplicar los cambios?",
+            )
             if reiniciar_sesion:
                 limpiar_archivos_configuracion()
-                subprocess.run(['pkill', '-HUP', '-u', getpass.getuser()])
+                subprocess.run(["pkill", "-HUP", "-u", usuario])
+            else:
+                try:
+                    self.root.destroy()
+                except tk.TclError:
+                    pass
         except subprocess.CalledProcessError as e:
-            messagebox.showerror("Error", f"No se pudo actualizar la contraseña: {e.stderr}")
+            detalle = e.stderr if getattr(e, "stderr", None) else e
+            messagebox.showerror("Error", f"No se pudo actualizar el perfil: {detalle}")
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo actualizar la contraseña: {e}")
+            messagebox.showerror("Error", f"No se pudo actualizar el perfil: {e}")
 
 

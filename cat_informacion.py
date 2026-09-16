@@ -81,7 +81,6 @@ import re
 import matplotlib.pyplot as plt
 import tkinter as tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from password import obtener_contrasena
 
 class Informacion:
     @staticmethod
@@ -175,81 +174,224 @@ class Informacion:
     
 
     @staticmethod
-    def obtener_informacion_tarjeta_grafica():
-        info_gpu = {
-            "Nombre": "No disponible",
-            "Modelo": "No disponible",
-            "Memoria": "No disponible",
-            "Controlador": "No disponible",
-            "Temperatura": "No disponible",
-            "Descripción": "No disponible"
-        }
-
+    def _comando_texto(args, timeout=8):
+        entorno = os.environ.copy()
+        entorno["LC_ALL"] = "C"
         try:
-            contrasena = obtener_contrasena()
+            resultado = subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=entorno,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            return ""
+        return resultado.stdout if resultado.returncode == 0 else resultado.stdout or ""
 
-            # Obtener información de la GPU usando lspci
-            lspci_proceso = subprocess.Popen(['sudo', '-S', 'lspci'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            output, error = lspci_proceso.communicate(input=contrasena + "\n")
+    @staticmethod
+    def _leer_sysfs(ruta):
+        try:
+            with open(ruta, encoding="utf-8") as archivo:
+                return archivo.read().strip()
+        except OSError:
+            return None
 
-            if lspci_proceso.returncode != 0:
-                print(f"Error al ejecutar lspci: {error}")
-                return info_gpu
+    @staticmethod
+    def _formato_bytes(nbytes):
+        try:
+            nbytes = float(nbytes)
+        except (TypeError, ValueError):
+            return None
+        for unidad in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if nbytes < 1024:
+                return f"{nbytes:.0f} {unidad}" if unidad == "B" else f"{nbytes:.1f} {unidad}"
+            nbytes /= 1024
+        return f"{nbytes:.1f} PiB"
 
-            gpu_info = [line for line in output.split('\n') if 'VGA compatible controller' in line or '3D controller' in line]
+    @staticmethod
+    def _fabricante_pci(vendor_id):
+        tabla = {
+            "10de": "NVIDIA",
+            "1002": "AMD",
+            "1022": "AMD",
+            "8086": "Intel",
+            "1414": "Microsoft",
+        }
+        return tabla.get((vendor_id or "").lower(), None)
 
-            if gpu_info:
-                info_gpu["Nombre"] = gpu_info[0].split(': ')[-1]
+    @staticmethod
+    def _gpus_lspci():
+        salida = Informacion._comando_texto(["lspci", "-nnk"])
+        gpus = []
+        actual = None
+        for linea in salida.splitlines():
+            if re.search(r"VGA compatible controller|3D controller|Display controller", linea):
+                if actual:
+                    gpus.append(actual)
+                vendor_id = ""
+                ids = re.search(r"\[([0-9a-fA-F]{4}):([0-9a-fA-F]{4})\]", linea)
+                if ids:
+                    vendor_id = ids.group(1).lower()
+                nombre = linea.split(": ", 1)[-1].strip() if ": " in linea else linea.strip()
+                actual = {
+                    "Nombre": Informacion._fabricante_pci(vendor_id) or "GPU",
+                    "Modelo": nombre,
+                    "Memoria": "No disponible",
+                    "Controlador": "No disponible",
+                    "Temperatura": "No disponible",
+                    "Descripción": "No disponible",
+                    "Fabricante": Informacion._fabricante_pci(vendor_id) or "Desconocido",
+                    "_vendor": vendor_id,
+                }
+            elif actual and "Kernel driver in use:" in linea:
+                actual["Controlador"] = linea.split(":", 1)[-1].strip()
+        if actual:
+            gpus.append(actual)
+        return gpus
 
-                # Usar lshw para obtener detalles adicionales
-                lshw_proceso = subprocess.Popen(['sudo', '-S', 'lshw', '-C', 'display'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-                lshw_output, lshw_error = lshw_proceso.communicate(input=contrasena + "\n")
+    @staticmethod
+    def _enriquecer_nvidia(gpus):
+        salida = Informacion._comando_texto(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total,temperature.gpu,driver_version",
+                "--format=csv,noheader,nounits",
+            ]
+        )
+        if not salida.strip():
+            return
+        lineas = [l.strip() for l in salida.splitlines() if l.strip()]
+        nvidia = [g for g in gpus if g.get("_vendor") == "10de"]
+        for indice, linea in enumerate(lineas):
+            partes = [p.strip() for p in linea.split(",")]
+            if len(partes) < 4:
+                continue
+            destino = nvidia[indice] if indice < len(nvidia) else None
+            if destino is None:
+                destino = {
+                    "Nombre": "NVIDIA",
+                    "Modelo": partes[0],
+                    "Memoria": "No disponible",
+                    "Controlador": "No disponible",
+                    "Temperatura": "No disponible",
+                    "Descripción": "No disponible",
+                    "Fabricante": "NVIDIA",
+                    "_vendor": "10de",
+                }
+                gpus.append(destino)
+            destino["Fabricante"] = "NVIDIA"
+            destino["Nombre"] = "NVIDIA"
+            destino["Modelo"] = partes[0] or destino["Modelo"]
+            if partes[1]:
+                destino["Memoria"] = f"{partes[1]} MiB"
+            if partes[2]:
+                destino["Temperatura"] = f"{partes[2]} °C"
+            if partes[3]:
+                destino["Controlador"] = f"nvidia {partes[3]}"
 
-                if lshw_proceso.returncode != 0:
-                    print(f"Error al ejecutar lshw: {lshw_error}")
-                    return info_gpu
+    @staticmethod
+    def _enriquecer_sysfs(gpus):
+        drm = "/sys/class/drm"
+        if not os.path.isdir(drm):
+            return
+        tarjetas = []
+        for nombre in sorted(os.listdir(drm)):
+            if not re.fullmatch(r"card\d+", nombre):
+                continue
+            base = os.path.join(drm, nombre, "device")
+            vendor = (Informacion._leer_sysfs(os.path.join(base, "vendor")) or "").lower().replace("0x", "")
+            if not vendor:
+                continue
+            tarjetas.append((vendor, base))
 
-                current_section = None
-                for line in lshw_output.split('\n'):
-                    line = line.strip()
-                    if not line:
-                        continue
+        usados = set()
+        for gpu in gpus:
+            vendor = gpu.get("_vendor")
+            for indice, (vendor_sys, base) in enumerate(tarjetas):
+                if indice in usados or vendor_sys != vendor:
+                    continue
+                usados.add(indice)
+                gpu["Fabricante"] = Informacion._fabricante_pci(vendor_sys) or gpu.get("Fabricante")
+                gpu["Nombre"] = gpu["Fabricante"]
+                vram = Informacion._leer_sysfs(os.path.join(base, "mem_info_vram_total"))
+                if vram and vram.isdigit() and gpu.get("Memoria") == "No disponible":
+                    gpu["Memoria"] = Informacion._formato_bytes(vram) or gpu["Memoria"]
+                hwmon = os.path.join(base, "hwmon")
+                if os.path.isdir(hwmon) and gpu.get("Temperatura") == "No disponible":
+                    for carpeta in os.listdir(hwmon):
+                        for sensor in ("temp1_input", "temp2_input"):
+                            bruto = Informacion._leer_sysfs(os.path.join(hwmon, carpeta, sensor))
+                            if bruto and bruto.lstrip("-").isdigit():
+                                gpu["Temperatura"] = f"{int(bruto) / 1000:.0f} °C"
+                                break
+                        if gpu.get("Temperatura") != "No disponible":
+                            break
+                break
 
-                    if line.startswith('*-display'):
-                        current_section = 'display'
-                    elif line.startswith('*-'):
-                        current_section = None
+    @staticmethod
+    def _enriquecer_glxinfo(gpus):
+        salida = Informacion._comando_texto(["glxinfo", "-B"])
+        if not salida:
+            return
+        renderer = None
+        memoria = None
+        for linea in salida.splitlines():
+            baja = linea.lower()
+            if "opengl renderer" in baja and ":" in linea:
+                renderer = linea.split(":", 1)[1].strip()
+            elif baja.startswith("video memory:") or "dedicated video memory" in baja:
+                memoria = linea.split(":", 1)[-1].strip()
+        if not gpus:
+            return
+        principal = gpus[0]
+        if renderer and principal.get("Descripción") in (None, "No disponible"):
+            principal["Descripción"] = renderer
+        if memoria and principal.get("Memoria") == "No disponible":
+            principal["Memoria"] = memoria
 
-                    if current_section == 'display':
-                        if line.startswith('descripción:'):
-                            info_gpu["Descripción"] = line.split('descripción:')[1].strip()
-                        elif line.startswith('producto:'):
-                            info_gpu["Modelo"] = line.split('producto:')[1].strip()
-                        elif line.startswith('fabricante:'):
-                            info_gpu["Nombre"] = line.split('fabricante:')[1].strip()
-                        elif 'driver=' in line:
-                            info_gpu["Controlador"] = line.split('driver=')[1].strip()
-                        elif line.startswith('size:'):
-                            info_gpu["Memoria"] = line.split('size:')[1].strip()
+    @staticmethod
+    def obtener_informacion_tarjeta_grafica():
+        """Lista de GPUs (Intel, AMD o NVIDIA) sin depender solo de nvidia-smi."""
+        try:
+            gpus = Informacion._gpus_lspci()
+            Informacion._enriquecer_nvidia(gpus)
+            Informacion._enriquecer_sysfs(gpus)
+            Informacion._enriquecer_glxinfo(gpus)
+            for gpu in gpus:
+                gpu.pop("_vendor", None)
+                if gpu.get("Descripción") == "No disponible":
+                    gpu["Descripción"] = gpu.get("Fabricante") or "Adaptador gráfico"
+            if not gpus:
+                return [{
+                    "Nombre": "No disponible",
+                    "Modelo": "No disponible",
+                    "Memoria": "No disponible",
+                    "Controlador": "No disponible",
+                    "Temperatura": "No disponible",
+                    "Descripción": "No se detectó un adaptador gráfico",
+                    "Fabricante": "Desconocido",
+                }]
+            return gpus
+        except Exception:
+            return [{
+                "Nombre": "No disponible",
+                "Modelo": "No disponible",
+                "Memoria": "No disponible",
+                "Controlador": "No disponible",
+                "Temperatura": "No disponible",
+                "Descripción": "No se pudo leer la GPU",
+                "Fabricante": "Desconocido",
+            }]
 
-                # Obtener memoria de la GPU usando nvidia-smi si está disponible
-                try:
-                    nvidia_smi_output = subprocess.check_output(['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader'], universal_newlines=True)
-                    info_gpu["Memoria"] = nvidia_smi_output.strip() 
-                except Exception as e:
-                    print(f"Error al obtener la memoria de la GPU con nvidia-smi: {e}")
-
-                # Obtener temperatura de la GPU
-                try:
-                    nvidia_smi_output = subprocess.check_output(['nvidia-smi', '--query-gpu=temperature.gpu', '--format=csv,noheader'], universal_newlines=True)
-                    info_gpu["Temperatura"] = nvidia_smi_output.strip() + " °C"
-                except Exception as e:
-                    print(f"Error al obtener la temperatura de la GPU: {e}")
-
-        except Exception as e:
-            print(f"Error al obtener información de la tarjeta gráfica: {e}")
-
-        return info_gpu
+    @staticmethod
+    def obtener_tiempo_arranque():
+        """Tiempo de arranque según systemd-analyze (kernel + userspace)."""
+        salida = Informacion._comando_texto(["systemd-analyze"], timeout=10)
+        if not salida.strip():
+            return "No disponible"
+        primera = salida.strip().splitlines()[0].strip()
+        return primera or "No disponible"
 
 
 
@@ -434,6 +576,7 @@ class Informacion:
         info["Dirección IP Local"] = Informacion.obtener_direccion_ip_local()
         info["Dirección IP Pública"] = Informacion.obtener_direccion_ip_publica()
         info["Tiempo de Actividad"] = Informacion.get_tiempo_actividad()
+        info["Tiempo de Arranque"] = Informacion.obtener_tiempo_arranque()
         #info["Fabricante del Equipo"] = Informacion.get_fabricante_equipo()
         info["Zona Horaria"] = Informacion.get_zona_horaria()
         info["Información del Procesador"] = Informacion.obtener_informacion_procesador()

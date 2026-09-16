@@ -1,0 +1,29 @@
+# Secretos locales (contraseña sudo cifrada y su clave)
+*.key
+config.txt
+
+# Registro de acciones de esta máquina
+acciones.log
+*.log
+
+# Entorno virtual y bytecode
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Paquetes
+*.deb
+
+# Sistema e IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

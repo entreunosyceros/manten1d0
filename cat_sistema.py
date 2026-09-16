@@ -13,11 +13,12 @@ from tkinter import font
 import hashlib
 from datetime import datetime, timezone
 import platform
-from tooltip import ToolTip    
+from tooltip import ToolTip
 import subprocess
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from placeholder import entradaConPlaceHolder
+from registro import registrar, registrar_comando, sudo_shell
 
 # Clase para generar la ventana de barra de progreso
 class ProgresoVentana(tk.Toplevel):
@@ -55,29 +56,39 @@ Raises:
 Función para ejecutar cualquier comando que necesite sudo y la contraseña
 '''
 def ejecutar_comando_con_sudo(comando, accion, master, callback=None):
-    contrasena = obtener_contrasena()
-    ventana_progreso = ProgresoVentana(master, accion)
+    def _done(ok):
+        if callback:
+            callback(ok)
 
-    proceso = subprocess.Popen(f"echo {contrasena} | sudo -S {comando}", shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    while proceso.poll() is None:
-        output = proceso.stdout.readline().strip()
-        if output:
-            ventana_progreso.label.config(text=output)
-        ventana_progreso.update_idletasks()
-        time.sleep(0.1)  # Espera corta para no sobrecargar el procesador
-    
-    ventana_progreso.destroy()
-    if callback:
-        callback()
+    sudo_shell(
+        comando,
+        accion,
+        master,
+        confirmar_accion=True,
+        on_done=_done,
+    )
 
 def actualizar_sistema(master):
     comando = "apt-get update && apt-get upgrade -y"
-    threading.Thread(target=ejecutar_comando_con_sudo, args=(comando, "Actualización del sistema", master, lambda: messagebox.showinfo("Información", "Actualización completada"))).start()
+    ejecutar_comando_con_sudo(
+        comando,
+        "actualizar el sistema",
+        master,
+        lambda ok: messagebox.showinfo("Información", "Actualización completada")
+        if ok
+        else messagebox.showerror("Error", "La actualización no se completó. Revisa Preferencias → Registro de acciones."),
+    )
 
 def limpiar_cache(master):
     comando = "apt-get clean && apt-get autoremove -y"
-    threading.Thread(target=ejecutar_comando_con_sudo, args=(comando, "Limpieza de caché", master, lambda: messagebox.showinfo("Información", "Limpieza de caché completada"))).start()
+    ejecutar_comando_con_sudo(
+        comando,
+        "limpiar la caché del sistema",
+        master,
+        lambda ok: messagebox.showinfo("Información", "Limpieza de caché completada")
+        if ok
+        else messagebox.showerror("Error", "La limpieza no se completó. Revisa Preferencias → Registro de acciones."),
+    )
 
 def abrir_gestor_software():
         try:
@@ -108,6 +119,8 @@ class Limpieza:
             confirmacion = messagebox.askyesno("Confirmar vaciado", "¿Estás seguro de que quieres vaciar la papelera de reciclaje?")
             if confirmacion:
                 os.system("gio trash --empty")
+                registrar("Vaciar papelera", "gio trash --empty", True)
+                registrar_comando("Vaciar papelera", "gio trash --empty", sudo=False, tipo="plain")
                 messagebox.showinfo("Éxito", "La papelera de reciclaje se ha vaciado correctamente.")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo vaciar la papelera de reciclaje. Error: {e}")
@@ -124,6 +137,7 @@ class Limpieza:
                         os.remove(elemento)
                     elif os.path.isdir(elemento):
                         os.rmdir(elemento)
+                    registrar("Eliminar elemento", elemento, True)
                     messagebox.showinfo("Éxito", "El elemento seleccionado se ha eliminado correctamente.")
             else:
                 messagebox.showwarning("Advertencia", "No se seleccionó ningún elemento para eliminar.")
@@ -172,9 +186,11 @@ Raises:
         # Botones para agregar y eliminar aplicaciones
         self.btn_agregar = tk.Button(master, text="Agregar", command=self.agregar_aplicacion)
         self.btn_agregar.grid(row=1, column=0, padx=5, pady=5)
+        ToolTip(self.btn_agregar, "Añade un programa al inicio de sesión")
 
         self.btn_eliminar = tk.Button(master, text="Eliminar", command=self.eliminar_aplicacion)
         self.btn_eliminar.grid(row=1, column=1, padx=5, pady=5)
+        ToolTip(self.btn_eliminar, "Quita el programa seleccionado del inicio de sesión")
 
     def actualizar_lista_aplicaciones(self):
         # Limpiar el Treeview antes de actualizar
@@ -271,6 +287,7 @@ class AdministrarProcesos:
         
         self.close_button = tk.Button(self.root, text="Cerrar Proceso", command=self.close_process)
         self.close_button.pack(side=tk.TOP)
+        ToolTip(self.close_button, "Termina el proceso seleccionado. Úsalo con precaución")
         
         self.load_processes()
 
@@ -795,6 +812,7 @@ class Repositorios:
         # Botón para añadir el PPA
         btn_anadir = tk.Button(ventana_ppa, text="Añadir", command=lambda: self.anadir_ppa(entrada_ppa.get(), ventana_ppa))
         btn_anadir.pack(pady=10)
+        ToolTip(btn_anadir, "Añade el PPA indicado con add-apt-repository")
 
     def anadir_ppa(self, ppa_url, ventana_ppa):
         from password import obtener_contrasena  # Importar la función para obtener la contraseña
@@ -927,7 +945,7 @@ class DebInstalador:
         """
         self.file_path = None
 
-    def seleccionar_archivo(self):
+    def seleccionar_archivo(self, parent=None):
         """
         Abre un cuadro de diálogo para seleccionar un archivo .deb y guarda la ruta del archivo seleccionado.
 
@@ -936,16 +954,24 @@ class DebInstalador:
         del archivo en self.file_path y muestra un mensaje informativo con la ruta del archivo seleccionado.
         """
         home_dir = os.path.expanduser("~")
-        root = tk.Tk()
-        root.withdraw()  # Ocultar la ventana principal de tkinter
         self.file_path = filedialog.askopenfilename(
+            parent=parent,
             initialdir=home_dir,
-            filetypes=[("Debian packages", "*.deb")]
+            filetypes=[("Debian packages", "*.deb")],
         )
         if not self.file_path:
-            return
-        else:
-            messagebox.showinfo("Información", f"Archivo seleccionado: {self.file_path}")
+            return False
+        messagebox.showinfo(
+            "Información",
+            f"Archivo seleccionado: {self.file_path}",
+            parent=parent,
+        )
+        return True
+
+    def ejecutar(self, parent=None):
+        """Selecciona un .deb e instala solo si el usuario no canceló."""
+        if self.seleccionar_archivo(parent):
+            self.instalar_deb()
 
     def instalar_deb(self):
         """
@@ -962,23 +988,59 @@ class DebInstalador:
             messagebox.showinfo("Información", "No se ha seleccionado ningún archivo.")
             return
 
-        try:
-            messagebox.showinfo("Información", f"Instalando {self.file_path}...")
-            # Obtén la contraseña desde el archivo password.py
-            contrasena = obtener_contrasena()
-            # Prepara el comando con sudo
-            comando = f'echo {contrasena} | sudo -S dpkg -i {self.file_path}'
-            subprocess.run(comando, shell=True, check=True)
-            messagebox.showinfo("Información", "Instalación completada.")
-        except subprocess.CalledProcessError as e:
-            messagebox.showerror("Error", f"Error durante la instalación: {e}")
-            messagebox.showinfo("Información", "Intentando corregir dependencias...")
-            try:
-                comando_fix = f'echo {contrasena} | sudo -S apt-get -f install -y'
-                subprocess.run(comando_fix, shell=True, check=True)
-                messagebox.showinfo("Información", "Dependencias corregidas y paquete instalado.")
-            except subprocess.CalledProcessError as e:
-                messagebox.showerror("Error", f"Error al corregir dependencias: {e}")
+        if not messagebox.askyesno(
+            "¿Seguro?",
+            f"¿Instalar el paquete {self.file_path} con dpkg?",
+        ):
+            registrar("Instalar .deb", "cancelado por el usuario", False)
+            return
+
+        contrasena = obtener_contrasena()
+
+        def trabajador():
+            comando = ["sudo", "-S", "-p", "", "dpkg", "-i", self.file_path]
+            entorno = os.environ.copy()
+            entorno["LC_ALL"] = "C"
+            resultado = subprocess.run(
+                comando,
+                input=contrasena + "\n",
+                capture_output=True,
+                text=True,
+                env=entorno,
+            )
+            if resultado.returncode != 0:
+                fix = subprocess.run(
+                    ["sudo", "-S", "-p", "", "apt-get", "-f", "install", "-y"],
+                    input=contrasena + "\n",
+                    capture_output=True,
+                    text=True,
+                    env=entorno,
+                )
+                ok = fix.returncode == 0
+                registrar("Instalar .deb", self.file_path, ok)
+                return ok, "Dependencias corregidas y paquete instalado." if ok else (
+                    resultado.stderr or fix.stderr or "Error al instalar el paquete."
+                )
+            registrar("Instalar .deb", self.file_path, True)
+            return True, "Instalación completada."
+
+        def terminar(resultado):
+            ok, mensaje = resultado
+            if ok:
+                messagebox.showinfo("Información", mensaje)
+            else:
+                messagebox.showerror("Error", mensaje)
+
+        from registro import en_hilo, ventana_progreso
+        parent = tk._default_root
+        progreso, _etiqueta = ventana_progreso(parent, "Instalar .deb", f"Instalando {os.path.basename(self.file_path)}...")
+
+        def al_terminar(resultado):
+            if progreso.winfo_exists():
+                progreso.destroy()
+            terminar(resultado)
+
+        en_hilo(parent, trabajador, al_terminar=al_terminar)
 
                 
 class DesinstalarPaquetes:
@@ -1126,20 +1188,44 @@ class DesinstalarPaquetes:
         package = self.packages_listbox.get(selected[0])
         package_type, package_name = package.split(": ")
 
-        try:
+        if not messagebox.askyesno(
+            "¿Seguro?",
+            f"¿Desinstalar el paquete {package_name} ({package_type})?",
+            parent=self.root,
+        ):
+            registrar("Desinstalar paquete", f"{package_type}:{package_name} cancelado", False)
+            return
+
+        contrasena = obtener_contrasena()
+
+        def trabajador():
             if package_type == "deb":
-                comando = f'echo {obtener_contrasena()} | sudo -S apt-get remove --purge -y {package_name}'
+                args = ["apt-get", "remove", "--purge", "-y", package_name]
             elif package_type == "snap":
-                comando = f'echo {obtener_contrasena()} | sudo -S snap remove {package_name}'
+                args = ["snap", "remove", package_name]
             else:
                 raise ValueError("Tipo de paquete desconocido.")
+            resultado = subprocess.run(
+                ["sudo", "-S", "-p", "", *args],
+                input=contrasena + "\n",
+                capture_output=True,
+                text=True,
+            )
+            registrar("Desinstalar paquete", f"{package_type}: {package_name}", resultado.returncode == 0)
+            if resultado.returncode != 0:
+                raise RuntimeError(resultado.stderr or "No se pudo desinstalar el paquete.")
+            return package_name
 
-            subprocess.run(comando, shell=True, check=True)
-            messagebox.showinfo("Información", f"Paquete {package_name} desinstalado correctamente.")
+        def al_terminar(nombre):
+            if progreso.winfo_exists():
+                progreso.destroy()
+            messagebox.showinfo("Información", f"Paquete {nombre} desinstalado correctamente.", parent=self.root)
             self.cargar_paquetes_instalados()
-        except subprocess.CalledProcessError as e:
-            messagebox.showerror("Error", f"Error al desinstalar el paquete: {e}")
-            
+            self.actualizar_lista_paquetes()
+
+        from registro import en_hilo, ventana_progreso
+        progreso, _etiqueta = ventana_progreso(self.root, "Desinstalar", f"Desinstalando {package_name}...")
+        en_hilo(self.root, trabajador, al_terminar=al_terminar) 
 # Clase para consultar los logs del sistema
 
 import tkinter as tk

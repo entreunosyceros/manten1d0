@@ -1,6 +1,6 @@
 # CATEGORÍA DICCIONARIO
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTextBrowser, QVBoxLayout, QWidget, QLineEdit, QAction, QFileDialog, QMessageBox, qApp
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTextBrowser, QVBoxLayout, QWidget, QLineEdit, QAction, QFileDialog, QMessageBox
 from PyQt5.QtCore import pyqtSignal
 import markdown2
 import requests
@@ -128,8 +128,12 @@ class VentanaDiccionario(QMainWindow):
 
         # Opción para salir de la aplicación
         salir_action = QAction("Salir", self)
-        salir_action.triggered.connect(qApp.quit)
+        salir_action.triggered.connect(self.close)
         archivo_menu.addAction(salir_action)
+
+    def closeEvent(self, event):
+        self.closed.emit()
+        event.accept()
 
     def abrir_terminal(self):
         try:
@@ -149,12 +153,19 @@ def abrir_ventana_diccionario(contenido_html):
         contenido_html (str): Contenido HTML a mostrar en la ventana del diccionario.
     """
     
-    app = QApplication(sys.argv)
+    app = QApplication.instance()
+    propio = app is None
+    if propio:
+        app = QApplication(sys.argv)
     ventana = VentanaDiccionario(contenido_html)
+    abrir_ventana_diccionario._ventana = ventana
     ventana.show()
-    
-    ventana.closed.connect(app.quit)  # Conectar el evento closed de la ventana al método quit de la aplicación
-    app.exec_()
+    ventana.raise_()
+    ventana.activateWindow()
+    if propio:
+        ventana.closed.connect(app.quit)
+        app.exec_()
+        abrir_ventana_diccionario._ventana = None
 
 def cargar_contenido_html():
     

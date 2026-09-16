@@ -1,0 +1,115 @@
+name: Informe de error
+description: Algo no funciona como debería
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar un error en **Manten1d0**. Cuanta más información des, más fácil será reproducirlo.
+
+        ⚠️ No incluyas contraseñas de sudo, claves Wi-Fi, archivos `.key` ni capturas de `acciones.log` con datos personales.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área afectada
+      options:
+        - Inicio (avisos, logo, registro)
+        - Perfil de usuario
+        - Información (informe, GPU, arranque)
+        - Sistema (limpiezas, SMART, servicios, impresoras, .deb)
+        - Archivos (copias, permisos, USB, hash)
+        - Internet (Wi-Fi, DNS, hosts, ruido, ping)
+        - Red local
+        - Navegadores
+        - Diccionario
+        - Notas
+        - Bandeja del sistema
+        - Preferencias / tema / actualizaciones
+        - Instalación o arranque (`index.py`, `main.py`, `.deb`)
+        - Otro
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: Versión de Manten1d0 (`config.ini` o Acerca de) o commit si ejecutas desde código fuente
+      placeholder: "0.6.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducir
+      description: Lista numerada de acciones hasta ver el fallo. Sin contraseñas ni secretos.
+      placeholder: |
+        1. Abrir Manten1d0 con `python3 index.py`
+        2. Ir a Sistema → Instalar .deb
+        3. Cancelar el cuadro de archivo
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportamiento esperado
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportamiento actual
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs o capturas
+      description: Salida de terminal, traceback o capturas (sin contraseñas, `.key` ni `acciones.log` sensibles)
+      render: shell
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Entorno
+      options:
+        - Código fuente (`python3 index.py`)
+        - Paquete Ubuntu (`.deb`)
+        - No lo sé
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Versión de Python
+      placeholder: "3.10.12"
+
+  - type: input
+    id: ubuntu
+    attributes:
+      label: Versión de Ubuntu
+      placeholder: "22.04"
+
+  - type: input
+    id: desktop
+    attributes:
+      label: Entorno de escritorio
+      placeholder: "GNOME, KDE, etc."
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmación
+      options:
+        - label: He buscado en issues abiertas y cerradas y no he encontrado un duplicado
+          required: true
+        - label: Este informe no incluye contraseñas, claves ni datos de sudo o Wi-Fi
+          required: true

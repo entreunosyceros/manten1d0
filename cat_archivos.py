@@ -34,6 +34,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from tooltip import ToolTip
+from registro import registrar, confirmar, en_hilo, ventana_progreso
 
 class CopiaSeguridad:
     def __init__(self, origen, destino):
@@ -42,39 +43,49 @@ class CopiaSeguridad:
     
     def realizar_copia_seguridad(self):
         try:
-            # Obtener la contraseña de sudo
             contrasena = obtener_contrasena()
-            # Crear el archivo de copia de seguridad con tar usando sudo y la contraseña proporcionada
+            entorno = os.environ.copy()
+            entorno["LC_ALL"] = "C"
             if self.destino.startswith("/"):
-                # La ruta de destino es una ruta absoluta, por lo que es necesario usar sudo
-                comando = f"echo '{contrasena}' | sudo -S tar -czvf {self.destino} -C {self.origen} ."
+                comando = ["sudo", "-S", "-p", "", "tar", "-czf", self.destino, "-C", self.origen, "."]
+                resultado = subprocess.run(
+                    comando,
+                    input=contrasena + "\n",
+                    capture_output=True,
+                    text=True,
+                    env=entorno,
+                )
             else:
-                # La ruta de destino es una ruta relativa, no es necesario usar sudo
-                comando = f"tar -czvf {self.destino} -C {self.origen} ."
-            subprocess.run(comando, shell=True)
+                comando = ["tar", "-czf", self.destino, "-C", self.origen, "."]
+                resultado = subprocess.run(comando, capture_output=True, text=True, env=entorno)
+            ok = resultado.returncode == 0
+            registrar("Copia de seguridad", f"{self.origen} -> {self.destino}", ok)
+            if not ok:
+                raise RuntimeError(resultado.stderr or "tar devolvió un error")
             return True
         except Exception as e:
-            # Mostrar mensaje de error en una ventana emergente
-            messagebox.showerror("Error", f"Error al realizar la copia de seguridad: {e}")
-            return False
+            registrar("Copia de seguridad", str(e), False)
+            raise
 
 class RestaurarCopiaSeguridad:
     def __init__(self, origen, destino):
         self.origen = origen
         self.destino = destino
-    
+
     def restaurar_copia_seguridad(self):
-        try:
-            # Obtener la contraseña de sudo
-            contrasena = obtener_contrasena()
-            # Restaurar la copia de seguridad con tar usando sudo y la contraseña proporcionada
-            comando = f"echo '{contrasena}' | sudo -S tar -xzvf {self.origen} -C {self.destino}"
-            subprocess.run(comando, shell=True)
-            return True
-        except Exception as e:
-            # Mostrar mensaje de error en una ventana emergente
-            messagebox.showerror("Error", f"Error al restaurar la copia de seguridad: {e}")
-            return False
+        contrasena = obtener_contrasena()
+        comando = ["sudo", "-S", "-p", "", "tar", "-xzf", self.origen, "-C", self.destino]
+        resultado = subprocess.run(
+            comando,
+            input=contrasena + "\n",
+            capture_output=True,
+            text=True,
+        )
+        ok = resultado.returncode == 0
+        registrar("Restaurar copia", f"{self.origen} -> {self.destino}", ok)
+        if not ok:
+            raise RuntimeError(resultado.stderr or "tar devolvió un error")
+        return True
 
 
 # Función para generar una clave derivada de la contraseña
@@ -300,6 +311,7 @@ class BulkRenameApp:
 
         self.folder_button = tk.Button(self.master, text="Seleccionar Carpeta", command=self.select_folder)
         self.folder_button.grid(row=0, column=2, padx=5, pady=5)
+        ToolTip(self.folder_button, "Elige la carpeta cuyos archivos se van a renombrar")
 
         self.prefix_label = tk.Label(self.master, text="Prefijo:")
         self.prefix_label.grid(row=1, column=0, padx=5, pady=5)

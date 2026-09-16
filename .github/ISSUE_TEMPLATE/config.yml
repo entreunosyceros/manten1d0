@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Guía de contribución
+    url: https://github.com/entreunosyceros/manten1d0/blob/main/CONTRIBUTING.md
+    about: Cómo reportar bugs, proponer mejoras y enviar pull requests.
+  - name: Documentación del proyecto
+    url: https://github.com/entreunosyceros/manten1d0/blob/main/README.md
+    about: Características de la versión actual, dependencias e instalación.
+  - name: Historial de versiones
+    url: https://github.com/entreunosyceros/manten1d0/blob/main/CHANGELOG.md
+    about: Cambios de versiones anteriores a la 0.6.0.
+  - name: Política de seguridad
+    url: https://github.com/entreunosyceros/manten1d0/security/policy
+    about: Reporta vulnerabilidades siguiendo SECURITY.md (no publiques detalles en issues abiertas).
