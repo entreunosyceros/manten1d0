@@ -1,5 +1,6 @@
 ## Manten1d0: Mantenimiento básico de Ubuntu
 <img width="798" height="766" alt="inicio" src="https://github.com/user-attachments/assets/09b50f34-0c50-40df-b053-d955fa474287" />
+
 ------------------------------------------------------------------
 * Manten1d0: sistema de mantenimiento básico y otras herramientas para Ubuntu.
 * Creado con: Python 3.10.12
