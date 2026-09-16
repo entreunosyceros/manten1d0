@@ -24,7 +24,7 @@ try:
 except ImportError:
     # Instalar python3-tk automáticamente sin mostrar mensaje al usuario
     proceso_instalacion = subprocess.Popen(
-        ["sudo", "apt", "install", "-y", "python3-tk", "python3-pip"],
+        ["sudo", "apt", "install", "-y", "python3-tk"],
         stdin=subprocess.PIPE,
         stderr=subprocess.PIPE,
         universal_newlines=True,
@@ -49,7 +49,7 @@ from dependencias import instalar_dependencias, resumen_dependencias_faltantes
 from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, internet_cat, navegadores_cat, perfil_cat, red_local_cat, sistema_cat, notas_cat, inicio_cat
 import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
 from registro import mostrar_registro
-from bandeja import BandejaSistema
+from bandeja import BandejaSistema, preparar_ventana_app, CLASE_VENTANA
 
 
 def instalar_dependencias_con_progreso(parent):
@@ -102,7 +102,8 @@ def main():
 
     obtener_contrasena()
 
-    root = tk.Tk()
+    root = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
+    preparar_ventana_app(root)
     root.title("Comprobando Dependencias")
     root.resizable(False, False)
 
@@ -162,7 +163,8 @@ def close_progress(root, progress_bar, label):
     # Cerrar la ventana de progreso
     root.destroy()
     # Crear la ventana principal
-    main_window = tk.Tk()
+    main_window = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
+    preparar_ventana_app(main_window)
     VentanaPrincipal(main_window)
     main_window.mainloop()
 

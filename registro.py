@@ -12,8 +12,8 @@ from tkinter import messagebox, scrolledtext, ttk
 from password import obtener_contrasena
 from tooltip import con_tooltip
 
-RUTA_REGISTRO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "acciones.log")
 RUTA_DATOS_USUARIO = os.path.join(os.path.expanduser("~"), ".local", "share", "Manten1d0")
+RUTA_REGISTRO = os.path.join(RUTA_DATOS_USUARIO, "acciones.log")
 RUTA_HISTORIAL = os.path.join(RUTA_DATOS_USUARIO, "historial_comandos.json")
 MAX_HISTORIAL = 40
 
@@ -25,6 +25,7 @@ def registrar(accion, detalle="", exito=True):
     if detalle:
         linea += f" — {detalle}"
     try:
+        os.makedirs(RUTA_DATOS_USUARIO, exist_ok=True)
         with open(RUTA_REGISTRO, "a", encoding="utf-8") as archivo:
             archivo.write(linea + "\n")
     except OSError:

@@ -74,16 +74,29 @@ Hay que instalarlas a mano si no están en el sistema:
 
 El programa las comprueba al iniciar e intenta instalar las que falten.
 
-**APT** (`dependencias.py`): samba, nmap, net-tools, ethtool, iw, gnome-terminal, python3-psutil, smartmontools, traceroute, python3-dbus, python3-tk, pciutils, lshw, arp-scan, cups-client, avahi-utils.
+**APT** (`dependencias.py`): samba, nmap, net-tools, ethtool, iw, gnome-terminal, smartmontools, traceroute, python3-dbus, python3-tk, pciutils, lshw, arp-scan, cups-client, avahi-utils; y los módulos Python `python3-pil`, `python3-pil.imagetk`, `python3-cryptography`, `python3-psutil`, `python3-matplotlib`, `python3-requests`, `python3-pyqt5`, `python3-netifaces`, `python3-markdown2`, `python3-nmap`, `speedtest-cli`.
 
-**pip** (`requirements.txt`): matplotlib, pillow, cryptography, psutil, markdown2, PyQt5, speedtest-cli, tabulate, opencv-python-headless, wget, Tooltip, Fernet, netifaces, pexpect, cffi, py3nvml, python-nmap, requests.
+**pip** (`requirements.txt`, solo si ejecutas desde código fuente con `index.py`): matplotlib, pillow, cryptography, psutil, markdown2, PyQt5, speedtest-cli, netifaces, python-nmap, requests.
 
 ## Instalación del paquete .DEB
+
+Generar el paquete desde el código fuente:
+
+```
+bash packaging/build-deb.sh
+```
 
 En una terminal (`Ctrl+Alt+T`):
 
 ```
+sudo apt install -f ./manten1d0_0.6.0_all.deb
+```
+
+o, como indica el nombre corto:
+
+```
 sudo dpkg -i Manten1d0.deb
+sudo apt-get install -f
 ```
 
 Tras la instalación deberías ver el lanzador en Actividades.

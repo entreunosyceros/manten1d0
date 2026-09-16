@@ -42,9 +42,14 @@ from tooltip import ToolTip
 import subprocess
 import base64
 
-# Verificar y cargar la clave de cifrado
-CLAVE_ARCHIVO = "clave.key" # clave de cifrado
-CONFIG_FILE = "config.txt" # archivo en el que guardamos la clave de usuario
+# Contraseña cifrada en la carpeta de datos del usuario (escribible también con el .deb)
+_DIR_DATOS = os.path.join(os.path.expanduser("~"), ".local", "share", "Manten1d0")
+try:
+    os.makedirs(_DIR_DATOS, exist_ok=True)
+except OSError:
+    pass
+CLAVE_ARCHIVO = os.path.join(_DIR_DATOS, "clave.key")
+CONFIG_FILE = os.path.join(_DIR_DATOS, "config.txt")
 
 # Función para generar una clave de cifrado
 def generar_clave():

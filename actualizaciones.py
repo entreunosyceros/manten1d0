@@ -4,7 +4,6 @@ Script de actualización de programas a través de GitHub.
 Imports:
     - tkinter as tk: Para la creación de interfaces gráficas.
     - requests: Para realizar solicitudes HTTP.
-    - wget: Para descargar archivos de la web.
     - subprocess: Para ejecutar procesos del sistema.
     - obtener_contrasena desde password: Para obtener la contraseña de sudo.
     - messagebox desde tkinter: Para mostrar mensajes de alerta.
@@ -22,7 +21,6 @@ Raises:
 
 import tkinter as tk
 import requests
-import wget
 import subprocess
 from password import obtener_contrasena
 from tkinter import messagebox
@@ -133,8 +131,12 @@ def mostrar_ventana_actualizaciones():
                 # Combinar la ruta de la carpeta home con el nombre del archivo .deb
                 archivo_descargado = os.path.join(ruta_home, "nombre_del_archivo.deb")
 
-                # Descargar el paquete .deb 
-                wget.download(url_descarga, archivo_descargado)
+                respuesta_deb = requests.get(url_descarga, stream=True, timeout=60)
+                respuesta_deb.raise_for_status()
+                with open(archivo_descargado, "wb") as destino:
+                    for trozo in respuesta_deb.iter_content(chunk_size=8192):
+                        if trozo:
+                            destino.write(trozo)
                 instalar_paquete_deb(archivo_descargado)
             else:
                 # Deshabilitar el botón de comprobar actualizaciones si las versiones son iguales

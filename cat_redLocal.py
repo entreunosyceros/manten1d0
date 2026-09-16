@@ -59,7 +59,7 @@ def _ordenar_ip(ip):
 
 def encontrar_dispositivos_en_red():
     if nmap is None:
-        raise RuntimeError("Falta el módulo python-nmap. Instálalo con: pip install python-nmap")
+        raise RuntimeError("Falta el módulo python-nmap. Instálalo con: sudo apt install python3-nmap")
     red = obtener_red_local()
     if not red:
         return []

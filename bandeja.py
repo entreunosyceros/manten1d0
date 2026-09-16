@@ -11,6 +11,31 @@ import threading
 
 RUTA_ICONO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
 RUTA_ESTE = os.path.abspath(__file__)
+CLASE_VENTANA = "Manten1d0"
+
+
+def preparar_ventana_app(ventana, tamano=128):
+    """Clase WM e icono para que el dock de Ubuntu muestre el logo."""
+    try:
+        ventana.tk.call("wm", "class", ".", CLASE_VENTANA, CLASE_VENTANA)
+    except Exception:
+        try:
+            ventana.wm_class(CLASE_VENTANA)
+        except Exception:
+            pass
+    try:
+        from PIL import Image, ImageTk
+    except ImportError:
+        return
+    try:
+        imagen = Image.open(RUTA_ICONO)
+        imagen.thumbnail((tamano, tamano), Image.LANCZOS)
+        foto = ImageTk.PhotoImage(imagen)
+        ventana.iconphoto(True, foto)
+        ventana._icono_manten1d0 = foto
+    except Exception:
+        return
+
 
 CATEGORIAS = (
     "Inicio",
@@ -160,17 +185,7 @@ class BandejaSistema:
             self.disponible = False
 
     def _poner_icono_ventana(self):
-        try:
-            from PIL import Image, ImageTk
-        except ImportError:
-            return
-        try:
-            imagen = Image.open(RUTA_ICONO)
-            imagen.thumbnail((64, 64), Image.LANCZOS)
-            self._icono_ventana = ImageTk.PhotoImage(imagen)
-            self.root.iconphoto(True, self._icono_ventana)
-        except Exception:
-            return
+        preparar_ventana_app(self.root, tamano=64)
 
     def _leer_comandos(self):
         proceso = self._proceso
