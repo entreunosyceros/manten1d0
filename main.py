@@ -54,7 +54,7 @@ from bandeja import BandejaSistema, preparar_ventana_app, CLASE_VENTANA
 
 def instalar_dependencias_con_progreso(parent):
     progress_window = tk.Toplevel(parent)
-    progress_window.title("Instalando dependencias")
+    progress_window.title("Instalando Dependencias")
     progress_window.geometry("360x110")
     progress_window.resizable(False, False)
     progress_window.transient(parent)
@@ -316,8 +316,34 @@ class VentanaPrincipal:
                 height=1,
             )
             
-            self.indicador_internet.pack(pady=20)
+            self.indicador_internet.pack(pady=(16, 6))
             ToolTip(self.indicador_internet, "Estado de la conexión a internet del equipo")
+
+            self.lbl_ip_privada = tk.Label(
+                self.menu_lateral,
+                text="IP privada: …",
+                bg="lightgrey",
+                fg="black",
+                font=("Arial", 9),
+                wraplength=190,
+                justify=tk.CENTER,
+            )
+            self.lbl_ip_privada.pack(pady=(4, 0))
+            ToolTip(self.lbl_ip_privada, "Dirección IP de este equipo en la red local")
+
+            self.lbl_ip_publica = tk.Label(
+                self.menu_lateral,
+                text="IP pública: …",
+                bg="lightgrey",
+                fg="black",
+                font=("Arial", 9),
+                wraplength=190,
+                justify=tk.CENTER,
+            )
+            self.lbl_ip_publica.pack(pady=(2, 8))
+            ToolTip(self.lbl_ip_publica, "Dirección IP pública de la conexión a Internet")
+            self._ip_publica_cache = ""
+            self._ip_publica_momento = 0
             # Iniciar la verificación de conexión a Internet
             self.check_connection()
 
@@ -652,9 +678,23 @@ class VentanaPrincipal:
         def trabajador():
             try:
                 requests.get("https://www.google.com", timeout=3)
-                estado = ("green", "Conexión establecida")
+                conectado = True
             except requests.RequestException:
-                estado = ("red", "Sin conexión")
+                conectado = False
+            privada = Informacion.obtener_direccion_ip_local()
+            if conectado:
+                ahora = time.time()
+                if not self._ip_publica_cache or ahora - self._ip_publica_momento > 120:
+                    publica = Informacion.obtener_direccion_ip_publica(timeout=4)
+                    self._ip_publica_cache = publica
+                    self._ip_publica_momento = ahora
+                else:
+                    publica = self._ip_publica_cache
+                estado = ("green", "Conexión establecida", privada, publica)
+            else:
+                self._ip_publica_cache = ""
+                self._ip_publica_momento = 0
+                estado = ("red", "Sin conexión", privada, "No disponible")
             try:
                 self.root.after(0, lambda e=estado: self._aplicar_estado_internet(*e))
             except RuntimeError:
@@ -662,10 +702,14 @@ class VentanaPrincipal:
 
         threading.Thread(target=trabajador, daemon=True).start()
 
-    def _aplicar_estado_internet(self, color, texto):
+    def _aplicar_estado_internet(self, color, texto, privada, publica):
         if not self.root.winfo_exists():
             return
         self.indicador_internet.config(bg=color, text=texto)
+        if self.lbl_ip_privada.winfo_exists():
+            self.lbl_ip_privada.config(text=f"IP privada: {privada}")
+        if self.lbl_ip_publica.winfo_exists():
+            self.lbl_ip_publica.config(text=f"IP pública: {publica}")
         self._internet_check_after_id = self.root.after(10000, self._comprobar_internet)
 
 if __name__ == "__main__":

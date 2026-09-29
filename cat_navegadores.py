@@ -411,7 +411,7 @@ class PerfilesNavegadores:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Perfiles y marcadores")
+        self.root.title("Perfiles Y Marcadores")
         self.root.geometry("720x420")
         self.filas = []
 

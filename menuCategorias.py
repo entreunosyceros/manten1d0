@@ -8,18 +8,18 @@ from PIL import Image, ImageTk
 import preferencias
 from cat_archivos import (
     BulkRenameApp,
-    CopiaSeguridad,
     FileSearchApp,
     RestaurarCopiaSeguridad,
     cifrar_archivo,
     descifrar_archivo,
 )
-from cat_archivos_extra import PermisosArchivos, DispositivosBloque, ArchivosGrandes, HashArchivo
+from cat_archivos_extra import PermisosArchivos, DispositivosBloque, ArchivosGrandes, HashArchivo, CopiaUSB
 from cat_diccionario import abrir_ventana_diccionario, cargar_contenido_html
 from cat_editorTexto import EditorTextos, carpeta_notas, listar_notas
 from cat_informacion import Informacion
 from cat_internet import RedTools, hacer_ping, reiniciar_tarjeta_red
 from cat_red_extra import RedesWifi, EditorHosts, SelectorDns
+from cat_vpn import PanelExpressVPN, expressvpn_disponible
 from cat_navegadores import (
     InstalarNavegadores,
     InstalarNavegadoresExtra,
@@ -29,7 +29,14 @@ from cat_navegadores import (
     _limpiar_directorio,
 )
 from cat_perfil import PerfilUsuario, crear_panel_perfil
-from cat_redLocal import doble_clic, encontrar_dispositivos_en_red, formatear_dispositivo
+from cat_redLocal import (
+    CompartirCarpeta,
+    EncenderPC,
+    doble_clic,
+    encontrar_dispositivos_en_red,
+    formatear_dispositivo,
+    recordar_equipos,
+)
 from cat_sistema import (
     AdministrarProcesos,
     AplicacionBuscadorDuplicados,
@@ -44,9 +51,9 @@ from cat_sistema import (
     limpiar_cache,
     abrir_gestor_software,
 )
-from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras
+from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras, EspacioDiscos, Cortafuegos
 from tooltip import ToolTip, con_tooltip
-from registro import confirmar, en_hilo, ventana_progreso, mostrar_registro, mostrar_historial_comandos, _widget_vivo
+from registro import confirmar, en_hilo, sudo_run, ventana_progreso, mostrar_registro, mostrar_historial_comandos, _widget_vivo
 from avisos import recoger_avisos
 
 COLORES_AVISO = {
@@ -61,7 +68,7 @@ RUTA_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.
 
 def _colocar_logo_inicio(self):
     """Muestra el logo adaptado al espacio del área central."""
-    fondo = "black" if preferencias.tema_seleccionado != "Claro" else "lightgrey"
+    fondo = preferencias.color_fondo()
     marco = tk.Frame(self.area_central, bg=fondo)
     marco.pack(fill=tk.X, padx=16, pady=(12, 4))
     etiqueta = tk.Label(marco, bg=fondo)
@@ -108,6 +115,27 @@ def _colocar_logo_inicio(self):
     self.area_central.after(40, ajustar)
 
 
+def _reiniciar_equipo(parent):
+    if not confirmar(
+        "El equipo se va a reiniciar ahora para terminar de aplicar las actualizaciones.\n\n"
+        "Guarda lo que tengas abierto. ¿Quieres reiniciar?",
+        parent,
+        "Reiniciar El Equipo",
+    ):
+        return
+
+    def trabajo():
+        return sudo_run(["systemctl", "reboot"], "Reiniciar el equipo", timeout=40)
+
+    def al_terminar(resultado):
+        if resultado is None or getattr(resultado, "returncode", 1) == 0:
+            return
+        texto = (resultado.stderr or resultado.stdout or "No se pudo reiniciar.").strip()
+        messagebox.showerror("Reiniciar El Equipo", texto, parent=parent)
+
+    en_hilo(parent, trabajo, al_terminar=al_terminar)
+
+
 def inicio_cat(self, mensaje_personalizado=None):
     self.contenedor_texto.pack_forget()
     for widget in self.area_central.winfo_children():
@@ -149,6 +177,13 @@ def inicio_cat(self, mensaje_personalizado=None):
         for aviso in avisos:
             fondo, frente = COLORES_AVISO.get(aviso["nivel"], COLORES_AVISO["info"])
             destino = aviso.get("destino")
+            accion = aviso.get("accion")
+            if accion == "reiniciar":
+                comando = lambda: _reiniciar_equipo(self.root)
+            elif destino:
+                comando = lambda d=destino: self.mostrar_subcategorias(d)
+            else:
+                comando = None
             boton = tk.Button(
                 marco_avisos,
                 text=f"{aviso['titulo']}\n{aviso['detalle']}",
@@ -159,10 +194,12 @@ def inicio_cat(self, mensaje_personalizado=None):
                 wraplength=480,
                 padx=12,
                 pady=8,
-                command=(lambda d=destino: self.mostrar_subcategorias(d)) if destino else None,
+                command=comando,
             )
             boton.pack(fill=tk.X, pady=5)
-            if destino:
+            if accion == "reiniciar":
+                ToolTip(boton, "Reinicia el equipo para terminar de aplicar las actualizaciones")
+            elif destino:
                 ToolTip(boton, "Abre la categoría relacionada con este aviso")
             else:
                 ToolTip(boton, aviso.get("detalle") or "Aviso informativo")
@@ -225,7 +262,7 @@ Steps:
         if preferencias.tema_seleccionado != "Claro":
             # Aplicar el tema seleccionado al mensaje personalizado
             preferencias.cambiar_tema(label_subcategorias, preferencias.tema_seleccionado)
-            label_subcategorias.config(bg="black", fg="white")
+            label_subcategorias.config(bg=preferencias.color_fondo(), fg=preferencias.color_texto())
 
         label_subcategorias.pack()
 
@@ -261,9 +298,9 @@ def diccionario_cat(self, mensaje_personalizado):
         if preferencias.tema_seleccionado != "Claro":
             preferencias.cambiar_tema(widget, preferencias.tema_seleccionado)
             if isinstance(widget, (tk.Label, tk.Button, tk.Entry, tk.Text, tk.Listbox)):
-                widget.config(bg="black", fg="white")
+                widget.config(bg=preferencias.color_fondo(), fg=preferencias.color_texto())
             else:
-                widget.config(bg="black")
+                widget.config(bg=preferencias.color_fondo())
 
     def abrir_diccionario():
         contenido_html = cargar_contenido_html()
@@ -318,9 +355,9 @@ def sistema_cat(self, mensaje_personalizado):
         if preferencias.tema_seleccionado != "Claro":
             preferencias.cambiar_tema(widget, preferencias.tema_seleccionado)
             if isinstance(widget, (tk.Label, tk.Button, tk.Entry, tk.Text, tk.Listbox)):
-                widget.config(bg="black", fg="white")
+                widget.config(bg=preferencias.color_fondo(), fg=preferencias.color_texto())
             else:
-                widget.config(bg="black")
+                widget.config(bg=preferencias.color_fondo())
 
     def crear_boton(contenedor, texto, comando, fila, columna, tooltip):
         boton = tk.Button(contenedor, text=texto, command=comando)
@@ -368,11 +405,13 @@ def sistema_cat(self, mensaje_personalizado):
     crear_boton(contenedor_botones, "Instalar .deb", lambda: DebInstalador().ejecutar(self.root), 3, 1, "Selecciona e instala un paquete .deb usando dpkg")
     crear_boton(contenedor_botones, "Desinstalar Paquetes", lambda: DesinstalarPaquetes(tk.Toplevel(self.area_central)), 3, 2, "Desinstalar paquetes instalados por el usuario")
     crear_boton(contenedor_botones, "Ver logs", lambda: consultaLogs(tk.Toplevel(self.area_central)), 4, 0, "Consulta los registros más importantes del sistema")
-    crear_boton(contenedor_botones, "Limpieza disco", lambda: LimpiezaEspacio(tk.Toplevel(self.area_central)), 4, 1, "Analiza y libera espacio: caché APT, journal, miniaturas, papelera y snaps antiguos")
+    crear_boton(contenedor_botones, "Limpieza disco", lambda: LimpiezaEspacio(tk.Toplevel(self.area_central)), 4, 1, "Analiza y libera espacio: caché, miniaturas, papelera, snaps y versiones viejas del sistema que ya no se usan")
     crear_boton(contenedor_botones, "Salud discos", lambda: SaludDiscos(tk.Toplevel(self.area_central)), 4, 2, "Consulta el estado SMART, temperatura y avisos de los discos")
     crear_boton(contenedor_botones, "Servicios", lambda: ServiciosSystemd(tk.Toplevel(self.area_central)), 5, 0, "Inicia, detiene, habilita o deshabilita servicios systemd")
     crear_boton(contenedor_botones, "Historial comandos", lambda: mostrar_historial_comandos(self.root), 5, 1, "Repite limpiezas y otras acciones ya ejecutadas desde la aplicación")
     crear_boton(contenedor_botones, "Impresoras", lambda: Impresoras(tk.Toplevel(self.area_central)), 5, 2, "Busca impresoras USB o de la red local y las colas ya instaladas en CUPS")
+    crear_boton(contenedor_botones, "Espacio discos", lambda: EspacioDiscos(tk.Toplevel(self.area_central)), 6, 0, "Muestra el espacio ocupado de cada disco y las carpetas que más pesan")
+    crear_boton(contenedor_botones, "Cortafuegos", lambda: Cortafuegos(tk.Toplevel(self.area_central)), 6, 1, "Activa o desactiva el cortafuegos. Activado: solo entran las conexiones que tú permites")
     
 # Función para mostrar la categoría INTERNET
 def internet_cat(self, mensaje_personalizado, entry_url=None):
@@ -489,6 +528,14 @@ Steps:
         ),
         "Edita /etc/hosts (se crea una copia de seguridad al guardar)",
     ).pack(side=tk.LEFT, padx=5)
+    if expressvpn_disponible():
+        con_tooltip(
+            tk.Button(
+                frame_extra_red, text="VPN", width=16,
+                command=lambda: PanelExpressVPN(tk.Toplevel(self.root)),
+            ),
+            "Estado, región, protocolo y bloqueo de red de ExpressVPN",
+        ).pack(side=tk.LEFT, padx=5)
 
     self.canvas = tk.Canvas(self.area_central, width=500, height=2, bg="lightgrey", highlightthickness=0)
     self.canvas.create_line(0, 1, 500, 1, fill="black")
@@ -627,6 +674,8 @@ Steps:
             else:
                 messagebox.showinfo("Buscar Equipos", "No se encontraron dispositivos en la red local.")
 
+            recordar_equipos(dispositivos)
+
             self.aviso_samba = tk.Label(
                 self.area_central,
                 text="IP, nombre, MAC y si comparte Samba. Doble clic abre smb:// si está disponible.",
@@ -642,6 +691,17 @@ Steps:
     boton_buscar = tk.Button(self.area_central, text="Buscar Equipos en Red Local", command=buscar_equipos_red_local)
     boton_buscar.pack(pady=10)
     ToolTip(boton_buscar, "Busca equipos conectados a tu red local (192.168.X.X)")
+
+    marco_red = tk.Frame(self.area_central)
+    marco_red.pack(pady=4)
+    con_tooltip(
+        tk.Button(marco_red, text="Compartir carpeta", command=lambda: CompartirCarpeta(tk.Toplevel(self.area_central))),
+        "Comparte una carpeta para que otro equipo de casa la vea",
+    ).pack(side=tk.LEFT, padx=6)
+    con_tooltip(
+        tk.Button(marco_red, text="Encender un PC", command=lambda: EncenderPC(tk.Toplevel(self.area_central))),
+        "Enciende un equipo apagado de la red si su placa lo permite",
+    ).pack(side=tk.LEFT, padx=6)
 
 
 
@@ -960,45 +1020,6 @@ def archivos_cat(self, mensaje_personalizado):
         self.canvas.create_line(0, 1, 500, 1, fill="black")
         self.canvas.pack(pady=10)
         
-    # Botón para realizar la copia de seguridad
-    def realizar_copia_seguridad():
-        # Obtener el directorio home del usuario
-        directorio_home = os.path.expanduser("~")
-        # Mostrar cuadros de diálogo para seleccionar origen y destino
-        origen = filedialog.askdirectory(title="Seleccionar carpeta de origen", initialdir=directorio_home)
-        # Si el usuario cancela la selección de carpeta, salimos de la función
-        if not origen:
-            # Mostrar mensaje de advertencia si falta alguna ruta
-            messagebox.showwarning("Advertencia", "Al no seleccionar la carpeta de origen, se aborta la copia de seguridad.")
-            return
-        destino = filedialog.asksaveasfilename(title="Guardar como archivo .gz", initialdir=directorio_home, filetypes=(("Archivos comprimidos", "*.gz"), ("Todos los archivos", "*.*")))
-        # Si el usuario cancela la selección de carpeta, salimos de la función
-        if not destino:
-            # Mostrar mensaje de advertencia si falta alguna ruta
-            messagebox.showwarning("Advertencia", "Al escribir el nombre de un archivo .gz, se aborta la copia de seguridad.")
-            return
-        # Verificar que se hayan seleccionado el origen y el destino
-        if origen and destino:
-            if not confirmar(
-                f"¿Crear una copia de seguridad de\n{origen}\nen\n{destino}?",
-                self.root,
-            ):
-                return
-            progreso, _et = ventana_progreso(self.root, "Copia de seguridad", "Creando archivo .gz...")
-
-            def trabajador():
-                return CopiaSeguridad(origen, destino).realizar_copia_seguridad()
-
-            def terminar(_ok):
-                if progreso.winfo_exists():
-                    progreso.destroy()
-                messagebox.showinfo("Copia de seguridad", "Copia de seguridad realizada con éxito.")
-
-            en_hilo(self.root, trabajador, al_terminar=terminar)
-        else:
-            # Mostrar mensaje de advertencia si falta alguna ruta
-            messagebox.showwarning("Advertencia", "Por favor, seleccione el directorio de origen y destino.")
-    
     # Función para restaurar la copia de seguridad
     def restaurar_copia_seguridad():
         # Obtener el directorio home del usuario
@@ -1028,7 +1049,7 @@ def archivos_cat(self, mensaje_personalizado):
                 self.root,
             ):
                 return
-            progreso, _et = ventana_progreso(self.root, "Restaurar copia", "Extrayendo archivo .gz...")
+            progreso, _et = ventana_progreso(self.root, "Restaurar Copia", "Extrayendo archivo .gz...")
 
             def trabajador():
                 return RestaurarCopiaSeguridad(origen, destino).restaurar_copia_seguridad()
@@ -1048,9 +1069,14 @@ def archivos_cat(self, mensaje_personalizado):
     frame_botones.pack()
 
     # Botón para realizar la copia de seguridad
-    boton_copia_seguridad = tk.Button(frame_botones, text="Copia de Seguridad", width=20, command=realizar_copia_seguridad)
+    boton_copia_seguridad = tk.Button(
+        frame_botones,
+        text="Copiar A Un USB",
+        width=20,
+        command=lambda: CopiaUSB(tk.Toplevel(self.area_central)),
+    )
     boton_copia_seguridad.pack(side=tk.LEFT, padx=5, pady=5)
-    ToolTip(boton_copia_seguridad, "Realizar una copia de seguridad")
+    ToolTip(boton_copia_seguridad, "Copia Documentos o el escritorio a un USB, en una carpeta con la fecha en el nombre")
 
     # Botón para restaurar la copia de seguridad
     boton_restaurar_copia_seguridad = tk.Button(frame_botones, text="Restaurar Copia de Seguridad", width=30, command=restaurar_copia_seguridad)
@@ -1155,9 +1181,9 @@ def perfil_cat(self, mensaje_personalizado):
         if preferencias.tema_seleccionado != "Claro":
             preferencias.cambiar_tema(widget, preferencias.tema_seleccionado)
             if isinstance(widget, (tk.Label, tk.Button, tk.Entry, tk.Text, tk.Listbox)):
-                widget.config(bg="black", fg="white")
+                widget.config(bg=preferencias.color_fondo(), fg=preferencias.color_texto())
             else:
-                widget.config(bg="black")
+                widget.config(bg=preferencias.color_fondo())
 
     def crear_label_y_linea(mensaje, font_size, padding):
         """Crea un label con un mensaje y dibuja una línea horizontal."""
@@ -1186,7 +1212,7 @@ def perfil_cat(self, mensaje_personalizado):
     else:
         crear_label_y_linea("PERFIL USUARIO", 12, 0)
 
-    fondo = "black" if preferencias.tema_seleccionado != "Claro" else "lightgrey"
+    fondo = preferencias.color_fondo()
     panel_perfil, foto_perfil = crear_panel_perfil(self.area_central, fondo=fondo)
     self._perfil_foto_tk = foto_perfil
     aplicar_tema(panel_perfil)
@@ -1227,9 +1253,9 @@ def notas_cat(self, mensaje_personalizado):
         if preferencias.tema_seleccionado != "Claro":
             preferencias.cambiar_tema(widget, preferencias.tema_seleccionado)
             if isinstance(widget, (tk.Label, tk.Button, tk.Entry, tk.Text, tk.Listbox)):
-                widget.config(bg="black", fg="white")
+                widget.config(bg=preferencias.color_fondo(), fg=preferencias.color_texto())
             else:
-                widget.config(bg="black")
+                widget.config(bg=preferencias.color_fondo())
 
     def crear_label_y_linea(mensaje, font_size, padding):
         """Crea un label con un mensaje y dibuja una línea horizontal."""

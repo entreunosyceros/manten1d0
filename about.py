@@ -31,7 +31,7 @@ def mostrar_about():
     version_actual = obtener_version_actual()
 
     about_window = tk.Toplevel()
-    about_window.title("Acerca de")
+    about_window.title("Acerca De")
     about_window.geometry("400x250")
     about_window.resizable(False, False)
 

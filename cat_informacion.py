@@ -102,22 +102,41 @@ class Informacion:
     
     @staticmethod
     def obtener_direccion_ip_local():
+        """IP del equipo en la red local, no la de un túnel VPN ni la de un puente virtual."""
+        try:
+            proceso = subprocess.run(
+                ["ip", "-4", "route", "show", "default"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            for linea in proceso.stdout.splitlines():
+                partes = linea.split()
+                if "src" in partes:
+                    address = partes[partes.index("src") + 1]
+                    if address and not address.startswith("127."):
+                        return address
+        except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+            pass
         interfaces = netifaces.interfaces()
         for interface in interfaces:
+            if interface == "lo" or interface.startswith(("docker", "br-", "virbr", "veth", "tun", "tap", "wg", "zt")):
+                continue
             try:
-                # Utilizamos netifaces para obtener la dirección IP local sin necesidad de sudo
                 address = netifaces.ifaddresses(interface)[netifaces.AF_INET][0]['addr']
-                if not address.startswith('127.'):
-                    return address
+                if address.startswith("127.") or address.startswith("169.254."):
+                    continue
+                return address
             except (KeyError, IndexError):
                 pass
         return 'No disponible'
 
     @staticmethod
-    def obtener_direccion_ip_publica():
+    def obtener_direccion_ip_publica(timeout=8):
         try:
-            ip = urllib.request.urlopen('https://ifconfig.me/ip').read().decode('utf8')
-            return ip.strip()
+            with urllib.request.urlopen('https://ifconfig.me/ip', timeout=timeout) as respuesta:
+                ip = respuesta.read().decode('utf8').strip()
+            return ip or 'No disponible'
         except Exception as e:
             print(f"No se pudo obtener la dirección IP pública: {e}")
             return 'No disponible'

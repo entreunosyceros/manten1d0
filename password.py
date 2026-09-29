@@ -149,7 +149,7 @@ def solicitar_contrasena_y_ejecutar(funcion, mostrar_output=True):
     else:
         if mostrar_output:
             ventana_resultado = tk.Toplevel()
-            ventana_resultado.title("Resultado de la Operación")
+            ventana_resultado.title("Resultado De La Operación")
 
             etiqueta_progreso = tk.Label(ventana_resultado, text="Progreso:")
             etiqueta_progreso.pack(pady=5)

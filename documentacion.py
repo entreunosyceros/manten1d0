@@ -26,7 +26,7 @@ SECCIONES = (
         "Menú Preferencias",
         "Repositorio GitHub: abre el repositorio del proyecto en el navegador.\n\n"
         "Buscar Actualizaciones: comprueba si hay una versión nueva del programa.\n\n"
-        "Opciones: cambia el tema (claro u oscuro) y el tamaño del texto.\n\n"
+        "Opciones: cambia el tema (claro, o el oscuro del sistema) y el tamaño del texto.\n\n"
         "Registro de acciones: muestra el historial de operaciones realizadas "
         "(sin guardar la contraseña de sudo).\n\n"
         "Atajos de teclado: resumen de Alt+1 a Alt+0 para saltar entre categorías.",
@@ -49,10 +49,14 @@ SECCIONES = (
         "Panel de estado del equipo. Muestra el logo, avisos y accesos rápidos.\n\n"
         "Avisos que puede mostrar:\n"
         "• Conexión a Internet caída.\n"
-        "• Disco raíz o carpeta personal por encima del 80 % (aviso) o del 90 % (crítico).\n"
+        "• Disco raíz o carpeta personal por encima del 80 % (aviso) o del 90 % (crítico). "
+        "Nombra las tres carpetas que más ocupan. Se puede borrar sin miedo la caché, "
+        "las miniaturas y la papelera. No se deben borrar máquinas virtuales ni documentos.\n"
+        "• Hay que reiniciar el equipo (si una actualización lo pide). Al pulsarlo, "
+        "pide confirmación y reinicia.\n"
         "• Actualizaciones de APT pendientes, incluidas las de seguridad.\n"
         "• Problemas SMART en los discos (si smartctl está disponible).\n\n"
-        "Al pulsar un aviso se abre la categoría relacionada.\n"
+        "Al pulsar un aviso se abre la categoría relacionada. El de reinicio pide confirmación y reinicia el equipo.\n"
         "Actualizar avisos vuelve a comprobar el estado.\n"
         "Ver registro de acciones abre el mismo historial que Preferencias.",
     ),
@@ -95,19 +99,32 @@ SECCIONES = (
         "Desinstalar Paquetes: quita paquetes instalados por el usuario.\n"
         "Ver logs: consulta registros importantes del sistema.\n"
         "Limpieza disco: analiza y puede liberar caché APT, journal, miniaturas, "
-        "papelera y snaps antiguos.\n"
+        "papelera, snaps antiguos y versiones viejas del sistema que ya no se usan. "
+        "Esa última casilla llega desmarcada: hay que elegirla a propósito. "
+        "Se conserva la versión que está en marcha y la anterior.\n"
         "Salud discos: estado SMART, temperatura y avisos de fallo.\n"
         "Servicios: iniciar, detener, reiniciar, habilitar o deshabilitar unidades systemd.\n"
         "Historial comandos: lista las limpiezas y acciones ya ejecutadas para repetirlas "
         "con confirmación. No guarda la contraseña de sudo.\n"
         "Impresoras: busca impresoras enchufadas por USB o anunciadas en la red local "
         "(mDNS/CUPS), lista las colas instaladas, envía una página de prueba y abre "
-        "la configuración de impresoras del sistema.",
+        "la configuración de impresoras del sistema.\n"
+        "Espacio discos: espacio ocupado, libre y porcentaje de cada disco local. "
+        "Al elegir uno, lista las carpetas que más ocupan. Doble clic entra en una "
+        "carpeta. No cruza a otro disco montado dentro. La casilla de carpetas "
+        "protegidas vuelve a medir con sudo las rutas que el usuario no puede leer.\n"
+        "Cortafuegos: enciende o apaga el cortafuegos del equipo (ufw). "
+        "Activado significa que solo entran las conexiones que tú permites; "
+        "la salida a Internet no se corta. Pide confirmación y la contraseña de administrador. "
+        "Si ufw no está instalado, la misma ventana puede instalarlo.",
     ),
     (
         "Archivos",
-        "Copia de Seguridad: comprime una carpeta en un archivo .gz.\n"
-        "Restaurar Copia de Seguridad: extrae un .gz en la carpeta que elijas "
+        "Copiar A Un USB: copia Documentos o el escritorio a un USB, en una carpeta "
+        "con la fecha en el nombre (por ejemplo Documentos-2026-09-29). "
+        "Los archivos se copian tal cual, sin comprimir. Si el USB no está abierto, se monta. "
+        "Si no cabe, avisa y no copia.\n"
+        "Restaurar Copia de Seguridad: extrae un archivo .gz antiguo en la carpeta que elijas "
         "(puede sobrescribir archivos).\n\n"
         "Cifrar Archivos / Descifrar Archivos: protege o recupera ficheros con cifrado.\n\n"
         "Busca archivos: localiza ficheros en el sistema por nombre.\n"
@@ -125,19 +142,33 @@ SECCIONES = (
         "Redes Wi-Fi: lista redes con nmcli, conecta (pidiendo clave si hace falta) o desconecta.\n"
         "DNS: cambia entre el automático del router, Cloudflare 1.1.1.1 o Google 8.8.8.8.\n"
         "Hosts locales: edita /etc/hosts con validación y copia de seguridad.\n"
+        "VPN: solo ExpressVPN. El botón aparece si está instalado expressvpnctl. "
+        "Muestra el estado y permite conectar, desconectar, elegir región y protocolo, "
+        "y cambiar el bloqueo de red, la red local, el arranque automático y el túnel dividido. "
+        "La sesión se inicia y se cierra en la aplicación oficial de ExpressVPN. "
+        "NordVPN, Surfshark, Proton VPN, CyberGhost, Mullvad y otros clientes no se configuran desde aquí.\n"
         "Escanear Puertos: revisa puertos abiertos de una IP.\n"
         "Test Velocidad: mide descarga y subida de la conexión.\n"
         "Diagnóstico Red: traceroute y netstat para ver por dónde falla la conectividad.\n"
         "Nivel de ruido: en Wi-Fi lee señal y ruido de radio (SNR). En cualquier conexión "
         "mide pérdida de paquetes y jitter hacia Internet. En cable muestra errores del adaptador.\n\n"
-        "El indicador del menú lateral muestra si hay conexión a Internet.",
+        "El indicador del menú lateral muestra si hay conexión a Internet. Debajo aparecen "
+        "la IP privada (la de la red de casa, no la del túnel VPN) y la IP pública de la conexión.",
     ),
     (
         "Red Local",
         "Buscar Equipos en Red Local recorre la red y lista cada dispositivo con IP, "
         "nombre, MAC y si comparte Samba (puertos 139/445).\n\n"
         "Haz doble clic en un equipo para abrir smb:// en el administrador de archivos "
-        "si el servicio está disponible.",
+        "si el servicio está disponible.\n\n"
+        "Compartir carpeta: elige una carpeta de tu usuario para que otro equipo de casa "
+        "la vea, solo para leer o también para cambiar archivos. Cualquiera de la red puede "
+        "abrirla sin contraseña. Hace falta pertenecer al grupo sambashare; si no, se ofrece "
+        "añadirte y hay que cerrar la sesión. Si el cortafuegos está activado, pregunta si "
+        "hay que permitir Samba. Al terminar indica la dirección smb:// de este equipo.\n"
+        "Encender un PC: envía la señal de encendido a un equipo guardado al buscar la red, "
+        "o a una dirección MAC que anotes. El otro PC tiene que estar apagado y enchufado, "
+        "y su placa debe permitir el encendido por red (Wake-on-LAN).",
     ),
     (
         "Navegadores",
@@ -193,10 +224,10 @@ def mostrar_documentacion(parent=None):
         _ventana_documentacion.focus_force()
         return
 
-    oscuro = preferencias.tema_seleccionado != "Claro"
-    fondo = "black" if oscuro else "lightgrey"
-    frente = "white" if oscuro else "black"
-    fondo_texto = "#1a1a1a" if oscuro else "white"
+    colores = preferencias.colores_de(preferencias.tema_seleccionado)
+    fondo = colores["bg"]
+    frente = colores["fg"]
+    fondo_texto = colores["base"]
 
     ventana = tk.Toplevel(parent) if parent else tk.Toplevel()
     ventana.title("Documentación")
@@ -240,8 +271,8 @@ def mostrar_documentacion(parent=None):
         exportselection=False,
         bg=fondo_texto,
         fg=frente,
-        selectbackground="#2471a3",
-        selectforeground="white",
+        selectbackground=colores["select"],
+        selectforeground=colores["select_fg"],
         highlightthickness=0,
         activestyle="none",
     )
@@ -289,7 +320,7 @@ def mostrar_documentacion(parent=None):
     mostrar_seccion(0)
 
     ventana.configure(bg=fondo)
-    if oscuro:
+    if preferencias.tema_seleccionado != "Claro":
         preferencias.cambiar_tema(ventana, preferencias.tema_seleccionado)
-        texto.configure(bg=fondo_texto, fg=frente)
-        lista.configure(bg=fondo_texto, fg=frente)
+        texto.configure(bg=fondo_texto, fg=frente, selectbackground=colores["select"], selectforeground=colores["select_fg"])
+        lista.configure(bg=fondo_texto, fg=frente, selectbackground=colores["select"], selectforeground=colores["select_fg"])

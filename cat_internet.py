@@ -112,7 +112,7 @@ def reiniciar_tarjeta_red(interfaz, parent=None, callback=None):
     if isinstance(contrasena, bytes):
         contrasena = contrasena.decode("utf-8")
     widget = parent or tk._default_root
-    progreso, etiqueta = ventana_progreso(widget, "Reiniciar red", f"Reiniciando {interfaz}...")
+    progreso, etiqueta = ventana_progreso(widget, "Reiniciar Red", f"Reiniciando {interfaz}...")
 
     def trabajador():
         if not shutil.which("ifconfig"):
@@ -154,7 +154,7 @@ def mostrar_resultado_ping(resultado_ping):
         resultado_ping (str): Resultado del comando ping a mostrar.
     """
     ventana_resultado_ping = tk.Toplevel()
-    ventana_resultado_ping.title("Resultado del Ping")
+    ventana_resultado_ping.title("Resultado Del Ping")
 
     # Etiqueta para mostrar el resultado del ping
     resultado_label = tk.Label(ventana_resultado_ping, text=resultado_ping, font=("Arial", 12))
@@ -434,7 +434,7 @@ class RedTools:
             if not ip:
                 messagebox.showwarning("Escaneo", "Indica una dirección IP.")
                 return
-            progreso, _et = ventana_progreso(self.root, "Escaneo de puertos", f"Escaneando {ip}...")
+            progreso, _et = ventana_progreso(self.root, "Escaneo De Puertos", f"Escaneando {ip}...")
 
             def trabajador():
                 abiertos = []
@@ -469,7 +469,7 @@ class RedTools:
         resultado_text.pack(pady=10)
 
         def realizar_test():
-            progreso, _et = ventana_progreso(self.root, "Test de velocidad", "Midiendo descarga y subida...")
+            progreso, _et = ventana_progreso(self.root, "Test De Velocidad", "Midiendo descarga y subida...")
 
             def trabajador():
                 st = speedtest.Speedtest()
@@ -501,7 +501,7 @@ class RedTools:
         resultado_text.pack(expand=True, fill=tk.BOTH)
 
         def realizar_diagnostico():
-            progreso, _et = ventana_progreso(self.root, "Diagnóstico de red", "Ejecutando traceroute y netstat...")
+            progreso, _et = ventana_progreso(self.root, "Diagnóstico De Red", "Ejecutando traceroute y netstat...")
 
             def trabajador():
                 if not shutil.which("traceroute"):
@@ -541,7 +541,7 @@ class RedTools:
 
         def medir():
             progreso, _et = ventana_progreso(
-                self.root, "Nivel de ruido", "Midiendo señal, ruido y latencia..."
+                self.root, "Nivel De Ruido", "Midiendo señal, ruido y latencia..."
             )
 
             def trabajador():

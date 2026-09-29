@@ -163,7 +163,7 @@ class PerfilUsuario:
             root (tk.Tk): La ventana principal de tkinter.
         """
         self.root = root
-        self.root.title("Modificar Perfil de Usuario en el Sistema Operativo")
+        self.root.title("Modificar Perfil De Usuario En El Sistema Operativo")
         self.root.geometry("400x600")
 
         datos = datos_perfil_actual()

@@ -27,13 +27,14 @@ def recoger_avisos():
     avisos = []
     avisos.extend(_aviso_conexion())
     avisos.extend(_aviso_disco())
+    avisos.extend(_aviso_reinicio())
     avisos.extend(_aviso_actualizaciones())
     avisos.extend(_aviso_smart())
     if not avisos:
         avisos.append({
             "nivel": "ok",
             "titulo": "Todo en orden",
-            "detalle": "No hay avisos de disco, actualizaciones, SMART ni conexión.",
+            "detalle": "No hay avisos de disco, reinicio, actualizaciones, SMART ni conexión.",
             "destino": None,
         })
     return avisos
@@ -78,10 +79,110 @@ def _aviso_disco():
         avisos.append({
             "nivel": nivel,
             "titulo": f"{etiqueta} al {porcentaje:.0f}%",
-            "detalle": f"Libre: {_tamano(uso.free)} de {_tamano(uso.total)}. Conviene limpiar espacio.",
+            "detalle": _detalle_disco(ruta, uso),
             "destino": "Sistema",
         })
     return avisos
+
+
+_PISTAS_CARPETA = {
+    ".cache": "caché",
+    ".thumbnails": "miniaturas",
+    ".config": "configuración de programas",
+    ".local": "datos de programas",
+    ".var": "Flatpak",
+    "snap": "aplicaciones Snap",
+    "VirtualBox": "máquinas virtuales",
+    "VirtualBox VMs": "máquinas virtuales",
+    "Descargas": "descargas",
+    "Downloads": "descargas",
+    "Documentos": "documentos",
+    "Documents": "documentos",
+    "Imágenes": "imágenes",
+    "Pictures": "imágenes",
+    "Vídeos": "vídeos",
+    "Videos": "vídeos",
+    ".thunderbird": "correo",
+    ".mozilla": "Firefox",
+}
+
+
+def _carpetas_mayores(ruta, limite=3):
+    """Las carpetas de primer nivel que más ocupan, sin cruzar a otro disco."""
+    proceso = _comando(["du", "-x", "-B1", "--max-depth=1", "--", ruta], timeout=45)
+    if not proceso.stdout:
+        return []
+    base = os.path.abspath(ruta)
+    filas = []
+    for linea in proceso.stdout.splitlines():
+        partes = linea.split("\t", 1)
+        if len(partes) != 2:
+            continue
+        try:
+            tam = int(partes[0])
+        except ValueError:
+            continue
+        camino = partes[1].rstrip("/")
+        if os.path.abspath(camino) == base:
+            continue
+        filas.append((tam, os.path.basename(camino) or camino))
+    filas.sort(reverse=True)
+    return filas[:limite]
+
+
+def _detalle_disco(ruta, uso):
+    libre = f"Libre: {_tamano(uso.free)} de {_tamano(uso.total)}."
+    mayores = _carpetas_mayores(ruta)
+    if not mayores:
+        return libre + " Conviene limpiar espacio."
+    trozos = []
+    for tam, nombre in mayores:
+        pista = _PISTAS_CARPETA.get(nombre)
+        if pista:
+            trozos.append(f"{nombre} ({_tamano(tam)}, {pista})")
+        else:
+            trozos.append(f"{nombre} ({_tamano(tam)})")
+    return (
+        libre
+        + " Lo que más ocupa: "
+        + ", ".join(trozos)
+        + ". Se puede borrar sin miedo: caché, miniaturas y papelera. "
+        "No borres máquinas virtuales ni documentos."
+    )
+
+
+def _aviso_reinicio():
+    if not os.path.isfile("/var/run/reboot-required"):
+        return []
+    detalle = "Una actualización no termina de aplicarse hasta reiniciar."
+    paquetes = _paquetes_reinicio()
+    if paquetes:
+        detalle += f" Afecta a: {paquetes}."
+    detalle += " Pulsa aquí para reiniciar."
+    return [{
+        "nivel": "aviso",
+        "titulo": "Hay que reiniciar el equipo",
+        "detalle": detalle,
+        "destino": None,
+        "accion": "reiniciar",
+    }]
+
+
+def _paquetes_reinicio():
+    ruta = "/var/run/reboot-required.pkgs"
+    if not os.path.isfile(ruta):
+        return ""
+    try:
+        with open(ruta, encoding="utf-8", errors="replace") as archivo:
+            nombres = [linea.strip() for linea in archivo if linea.strip()]
+    except OSError:
+        return ""
+    if not nombres:
+        return ""
+    texto = ", ".join(nombres[:4])
+    if len(nombres) > 4:
+        texto += "…"
+    return texto
 
 
 def _aviso_actualizaciones():

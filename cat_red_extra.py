@@ -251,7 +251,7 @@ class EditorHosts:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Hosts locales")
+        self.root.title("Hosts Locales")
         _centrar(self.root, 700, 520)
 
         tk.Label(self.root, text="Archivo /etc/hosts", font=("Arial", 14, "bold")).pack(pady=8)

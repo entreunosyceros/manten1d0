@@ -172,7 +172,7 @@ Raises:
 
     def __init__(self, master):
         self.master = master
-        self.master.title("Configuración de Aplicaciones de Autostart")
+        self.master.title("Configuración De Aplicaciones De Autostart")
 
         # Crear un Treeview para mostrar las aplicaciones de autostart
         self.treeview = ttk.Treeview(master, columns=("Aplicación"))
@@ -630,7 +630,7 @@ Raises:
 class Repositorios:
     def __init__(self, master):
         self.master = master
-        master.title("Administrador de Repositorios")
+        master.title("Administrador De Repositorios")
 
         # Crear un marco para la lista de repositorios
         self.frame_repositorios = tk.Frame(master)
@@ -1081,7 +1081,7 @@ class DesinstalarPaquetes:
         root (tk.Tk): La ventana principal de la interfaz gráfica.
         """
         self.root = root
-        self.root.title("Gestor de Paquetes")
+        self.root.title("Gestor De Paquetes")
         
         # Crear campo de búsqueda con placeholder
         self.search_var = tk.StringVar()
@@ -1239,7 +1239,7 @@ class consultaLogs:
         self.current_tooltip = None  # Añadimos un atributo para rastrear el tooltip actual
 
     def mostrar_logs(self):
-        self.master.title("Logs del Sistema")
+        self.master.title("Logs Del Sistema")
         
         logs_frame = tk.Frame(self.master)
         logs_frame.pack(side=tk.LEFT, fill=tk.Y)

@@ -145,7 +145,7 @@ def confirmar(mensaje, parent=None, titulo="¿Seguro?"):
 
 def mostrar_registro(parent=None):
     ventana = tk.Toplevel(parent)
-    ventana.title("Registro de acciones")
+    ventana.title("Registro De Acciones")
     ventana.geometry("720x420")
     texto = scrolledtext.ScrolledText(ventana, wrap=tk.WORD)
     texto.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
@@ -161,7 +161,7 @@ def mostrar_registro(parent=None):
 def mostrar_historial_comandos(parent=None):
     """Lista comandos repetibles (limpiezas, apt, etc.) y permite volver a lanzarlos."""
     ventana = tk.Toplevel(parent)
-    ventana.title("Historial de comandos")
+    ventana.title("Historial De Comandos")
     ventana.geometry("760x440")
 
     tk.Label(

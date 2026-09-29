@@ -41,7 +41,7 @@ def nombre_nota_nuevo():
 class EditorTextos:
     def __init__(self, root, ruta_inicial=None):
         self.root = root
-        self.root.title("Editor de Texto")
+        self.root.title("Editor De Texto")
         self.root.geometry("800x600")
         self.ruta_archivo = ruta_inicial
 
@@ -131,7 +131,7 @@ class EditorTextos:
 
     def _actualizar_titulo(self):
         nombre = os.path.basename(self.ruta_archivo) if self.ruta_archivo else "Nota nueva"
-        self.root.title(f"Editor de Texto — {nombre}")
+        self.root.title(f"Editor De Texto — {nombre}")
 
     def _cargar_ruta(self, ruta):
         try:

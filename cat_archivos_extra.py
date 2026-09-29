@@ -1,10 +1,11 @@
-"""Permisos, dispositivos de bloque, archivos grandes y hash."""
+"""Permisos, dispositivos de bloque, archivos grandes, hash y copia a USB."""
 
 import grp
 import hashlib
 import os
 import pwd
 import re
+import shutil
 import stat
 import subprocess
 import time
@@ -57,7 +58,7 @@ class PermisosArchivos:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Permisos y propietario")
+        self.root.title("Permisos Y Propietario")
         _centrar(self.root, 560, 480)
         self.ruta = tk.StringVar()
         self.owner = tk.StringVar()
@@ -269,7 +270,7 @@ class DispositivosBloque:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Dispositivos USB / bloque")
+        self.root.title("Dispositivos USB / Bloque")
         _centrar(self.root, 780, 460)
         self.filas = []
 
@@ -400,7 +401,7 @@ class ArchivosGrandes:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Liberar espacio")
+        self.root.title("Liberar Espacio")
         _centrar(self.root, 820, 520)
         self.carpeta = tk.StringVar(value=os.path.expanduser("~"))
         self.min_mb = tk.StringVar(value="100")
@@ -550,7 +551,7 @@ class HashArchivo:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Hash de archivo")
+        self.root.title("Hash De Archivo")
         _centrar(self.root, 640, 380)
         self.ruta = tk.StringVar()
         self.esperado = tk.StringVar()
@@ -651,3 +652,243 @@ class HashArchivo:
                 self.resultado.config(text=f"Coincide con {nombre}. El archivo es el esperado.")
                 return
         self.resultado.config(text="No coincide con MD5, SHA-1 ni SHA-256. Revisa la descarga.")
+
+
+def _carpeta_xdg(clave, respaldo):
+    proceso = _comando(["xdg-user-dir", clave], timeout=5)
+    ruta = (proceso.stdout or "").strip()
+    if ruta and os.path.isdir(ruta):
+        return ruta
+    candidata = os.path.join(os.path.expanduser("~"), respaldo)
+    return candidata if os.path.isdir(candidata) else ""
+
+
+def _dentro(hijo, padre):
+    hijo = os.path.realpath(hijo)
+    padre = os.path.realpath(padre)
+    return hijo == padre or hijo.startswith(padre + os.sep)
+
+
+def _listar_usb():
+    resultado = _comando([
+        "lsblk", "-lnp", "--pairs", "-o",
+        "NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT,TRAN,RM",
+    ], timeout=10)
+    discos = []
+    if resultado.returncode != 0:
+        return discos
+    for linea in resultado.stdout.splitlines():
+        campos = dict(re.findall(r'(\w+)="([^"]*)"', linea))
+        nombre = campos.get("NAME", "")
+        if not nombre or "loop" in nombre:
+            continue
+        extraible = campos.get("RM", "") in ("1", "yes") or campos.get("TRAN") == "usb"
+        if not extraible or not campos.get("FSTYPE"):
+            continue
+        discos.append({
+            "name": nombre,
+            "size": campos.get("SIZE", ""),
+            "label": campos.get("LABEL") or "USB",
+            "mount": campos.get("MOUNTPOINT", ""),
+            "fstype": campos.get("FSTYPE", ""),
+        })
+    return discos
+
+
+def _montar_usb(dispositivo):
+    resultado = _comando(["udisksctl", "mount", "-b", dispositivo], timeout=30)
+    if resultado.returncode != 0:
+        raise RuntimeError((resultado.stderr or resultado.stdout or "No se pudo abrir el USB.").strip())
+    coincidencia = re.search(r" at (.+)\.?$", (resultado.stdout or "").strip())
+    if coincidencia:
+        return coincidencia.group(1).rstrip(".")
+    for disco in _listar_usb():
+        if disco["name"] == dispositivo and disco["mount"]:
+            return disco["mount"]
+    raise RuntimeError("El USB se abrió, pero no se ve dónde está montado.")
+
+
+def _tamano_carpeta(ruta):
+    proceso = _comando(["du", "-sb", "--", ruta], timeout=180)
+    if proceso.returncode not in (0, 1) or not proceso.stdout:
+        return 0
+    try:
+        return int(proceso.stdout.split()[0])
+    except (ValueError, IndexError):
+        return 0
+
+
+class CopiaUSB:
+    """Copia Documentos o el escritorio a un USB, en una carpeta con la fecha."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Copiar A Un USB")
+        self.root.minsize(520, 380)
+        _centrar(self.root, 560, 440)
+        self.discos = []
+        self.documentos = _carpeta_xdg("DOCUMENTS", "Documentos")
+        self.escritorio = _carpeta_xdg("DESKTOP", "Escritorio")
+        self.var_documentos = tk.BooleanVar(value=bool(self.documentos))
+        self.var_escritorio = tk.BooleanVar(value=False)
+        self._ocupado = False
+
+        tk.Label(self.root, text="Copiar A Un USB", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Copia Documentos o el escritorio a un USB. "
+                "La carpeta lleva la fecha en el nombre, por ejemplo Documentos-2026-09-29. "
+                "Los archivos se copian tal cual: no se comprimen."
+            ),
+            wraplength=500,
+            justify=tk.LEFT,
+        ).pack(padx=16, pady=(0, 8))
+
+        marco_origen = tk.Frame(self.root)
+        marco_origen.pack(anchor="w", padx=16)
+        tk.Checkbutton(
+            marco_origen,
+            text=f"Documentos ({self.documentos or 'no encontrada'})",
+            variable=self.var_documentos,
+            state=tk.NORMAL if self.documentos else tk.DISABLED,
+        ).pack(anchor="w")
+        tk.Checkbutton(
+            marco_origen,
+            text=f"Escritorio ({self.escritorio or 'no encontrado'})",
+            variable=self.var_escritorio,
+            state=tk.NORMAL if self.escritorio else tk.DISABLED,
+        ).pack(anchor="w")
+
+        self.lista = tk.Listbox(self.root, height=6, font=("monospace", 10))
+        self.lista.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        self.lbl_estado = tk.Label(self.root, text="", anchor="w")
+        self.lbl_estado.pack(fill=tk.X, padx=16)
+
+        marco = tk.Frame(self.root)
+        marco.pack(pady=10)
+        self.btn_buscar = tk.Button(marco, text="Buscar USB", command=self.buscar)
+        self.btn_buscar.pack(side=tk.LEFT, padx=6)
+        con_tooltip(self.btn_buscar, "Vuelve a buscar memorias USB enchufadas")
+        self.btn_copiar = tk.Button(marco, text="Copiar", command=self.copiar)
+        self.btn_copiar.pack(side=tk.LEFT, padx=6)
+        con_tooltip(self.btn_copiar, "Copia las carpetas marcadas al USB elegido, con la fecha en el nombre")
+        boton_cerrar = tk.Button(marco, text="Cerrar", command=self.root.destroy)
+        boton_cerrar.pack(side=tk.LEFT, padx=6)
+        con_tooltip(boton_cerrar, "Cierra esta ventana")
+        _tema(self.root)
+        self.buscar()
+
+    def buscar(self):
+        self.discos = _listar_usb()
+        self.lista.delete(0, tk.END)
+        if not self.discos:
+            self.lista.insert(tk.END, "No hay ningún USB. Enchúfalo y pulsa Buscar USB.")
+            self.lbl_estado.config(text="")
+            return
+        for disco in self.discos:
+            donde = disco["mount"] or "sin abrir"
+            self.lista.insert(tk.END, f"{disco['label']:<16} {disco['size']:>8}  {donde}")
+        self.lbl_estado.config(text="Elige el USB y pulsa Copiar.")
+
+    def _origenes(self):
+        origenes = []
+        if self.var_documentos.get() and self.documentos:
+            origenes.append(("Documentos", self.documentos))
+        if self.var_escritorio.get() and self.escritorio:
+            origenes.append(("Escritorio", self.escritorio))
+        return origenes
+
+    def copiar(self):
+        if self._ocupado:
+            return
+        origenes = self._origenes()
+        if not origenes:
+            messagebox.showinfo("Copiar A Un USB", "Marca Documentos, el escritorio, o los dos.", parent=self.root)
+            return
+        indice = self.lista.curselection()
+        if not self.discos or not indice or indice[0] >= len(self.discos):
+            messagebox.showinfo("Copiar A Un USB", "Elige un USB de la lista.", parent=self.root)
+            return
+        disco = self.discos[indice[0]]
+        fecha = datetime.now().strftime("%Y-%m-%d")
+        nombres = ", ".join(f"{etiqueta}-{fecha}" for etiqueta, _ruta in origenes)
+        if not confirmar(
+            f"Se va a copiar al USB {disco['label']}.\n\n"
+            f"Carpetas: {nombres}.\n"
+            "Los archivos se copian tal cual, sin comprimir.\n\n"
+            "¿Quieres continuar?",
+            self.root,
+            "Copiar A Un USB",
+        ):
+            return
+        self._ocupado = True
+        self.btn_copiar.config(state=tk.DISABLED)
+        self.btn_buscar.config(state=tk.DISABLED)
+        self.lbl_estado.config(text="Copiando… puede tardar si hay muchos archivos.")
+
+        def trabajo():
+            montaje = disco["mount"]
+            if not montaje:
+                montaje = _montar_usb(disco["name"])
+            if not os.path.isdir(montaje):
+                raise RuntimeError(f"No se puede escribir en {montaje}.")
+            libres = shutil.disk_usage(montaje).free
+            necesario = sum(_tamano_carpeta(ruta) for _etiqueta, ruta in origenes)
+            if necesario and libres < necesario + 32 * 1024 * 1024:
+                raise RuntimeError(
+                    f"El USB no tiene sitio suficiente. Hacen falta unos {necesario / (1024 ** 3):.1f} GB "
+                    f"y quedan {libres / (1024 ** 3):.1f} GB."
+                )
+            hechas = []
+            for etiqueta, ruta in origenes:
+                if _dentro(montaje, ruta):
+                    raise RuntimeError("El USB está dentro de la carpeta que quieres copiar.")
+                destino = os.path.join(montaje, f"{etiqueta}-{fecha}")
+                sufijo = 2
+                while os.path.exists(destino):
+                    destino = os.path.join(montaje, f"{etiqueta}-{fecha}-{sufijo}")
+                    sufijo += 1
+                os.makedirs(destino, exist_ok=True)
+                proceso = subprocess.run(
+                    [
+                        "rsync", "-rl", "--no-perms", "--no-owner", "--no-group",
+                        "--modify-window=1",
+                        ruta.rstrip("/") + "/",
+                        destino.rstrip("/") + "/",
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+                if proceso.returncode != 0:
+                    detalle = (proceso.stderr or proceso.stdout or "rsync falló").strip()
+                    raise RuntimeError(detalle[:400])
+                hechas.append(os.path.basename(destino))
+            return montaje, hechas
+
+        def fin(resultado):
+            self._ocupado = False
+            if not self.root.winfo_exists():
+                return
+            self.btn_copiar.config(state=tk.NORMAL)
+            self.btn_buscar.config(state=tk.NORMAL)
+            montaje, hechas = resultado
+            registrar("Copia a USB", f"{', '.join(hechas)} -> {montaje}", True)
+            self.lbl_estado.config(text="Copia terminada.")
+            messagebox.showinfo(
+                "Copiar A Un USB",
+                "Listo. En el USB están:\n" + "\n".join(hechas),
+                parent=self.root,
+            )
+            self.buscar()
+
+        def error(exc):
+            self._ocupado = False
+            if self.root.winfo_exists():
+                self.btn_copiar.config(state=tk.NORMAL)
+                self.btn_buscar.config(state=tk.NORMAL)
+                self.lbl_estado.config(text="No se pudo copiar.")
+            registrar("Copia a USB", str(exc), False)
+            messagebox.showerror("Copiar A Un USB", str(exc), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=fin, al_error=error)

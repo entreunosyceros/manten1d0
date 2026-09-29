@@ -1,12 +1,13 @@
 """
 Herramientas extra de la categoría Sistema:
-limpieza de espacio en disco, salud SMART y servicios systemd.
+limpieza de espacio en disco, salud SMART, uso por carpetas, cortafuegos y servicios systemd.
 """
 
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import threading
 import tkinter as tk
@@ -15,7 +16,7 @@ from tkinter import messagebox, scrolledtext, ttk
 import preferencias
 from password import obtener_contrasena
 from tooltip import ToolTip
-from registro import registrar, registrar_comando, en_hilo
+from registro import registrar, registrar_comando, confirmar, en_hilo, sudo_run
 
 
 def _centrar_ventana(ventana, ancho, alto):
@@ -60,6 +61,118 @@ def _comando(args, timeout=60, env=None):
     except (FileNotFoundError, subprocess.TimeoutExpired) as error:
         resultado = subprocess.CompletedProcess(args, 1, "", str(error))
         return resultado
+
+
+_RE_KERNEL = re.compile(
+    r"^linux-(?:image|image-unsigned|modules|modules-extra|headers)-(\d+\.\d+\.\d+-\d+)(?:-generic)?$"
+)
+
+
+def _clave_kernel(version):
+    coincidencia = re.match(r"(\d+)\.(\d+)\.(\d+)-(\d+)", version)
+    if not coincidencia:
+        return (0, 0, 0, 0)
+    return tuple(int(parte) for parte in coincidencia.groups())
+
+
+def _versiones_viejas():
+    """Paquetes de kernels que no son el que está en marcha ni el anterior."""
+    actual = os.uname().release
+    coincidencia = re.match(r"(\d+\.\d+\.\d+-\d+)", actual)
+    version_actual = coincidencia.group(1) if coincidencia else ""
+    proceso = _comando(
+        [
+            "dpkg-query", "-W", "-f", "${db:Status-Status}\t${Package}\t${Installed-Size}\n",
+            "linux-image-*", "linux-modules-*", "linux-headers-*",
+        ],
+        timeout=30,
+    )
+    versiones = {}
+    for linea in (proceso.stdout or "").splitlines():
+        partes = linea.split("\t")
+        if len(partes) < 3:
+            continue
+        estado, nombre, tamano = partes[0], partes[1], partes[2]
+        if estado not in ("installed", "config-files"):
+            continue
+        encontrada = _RE_KERNEL.match(nombre)
+        if not encontrada:
+            continue
+        versiones.setdefault(encontrada.group(1), []).append((nombre, int(tamano or 0) * 1024))
+    if not versiones:
+        return {
+            "paquetes": [],
+            "tamano": 0,
+            "texto": "No hay versiones viejas que quitar.",
+        }
+    orden = sorted(versiones, key=_clave_kernel)
+    conservar = set()
+    if version_actual:
+        conservar.add(version_actual)
+    conservar.add(orden[-1])
+    anteriores = [version for version in orden if _clave_kernel(version) < _clave_kernel(version_actual or orden[-1])]
+    if anteriores:
+        conservar.add(anteriores[-1])
+    paquetes = []
+    tamano = 0
+    for version, entradas in versiones.items():
+        if version in conservar:
+            continue
+        for nombre, peso in entradas:
+            paquetes.append(nombre)
+            tamano += peso
+    if not paquetes:
+        return {
+            "paquetes": [],
+            "tamano": 0,
+            "texto": f"No hay versiones viejas. Se conserva la que está en marcha ({version_actual or actual}).",
+        }
+    return {
+        "paquetes": paquetes,
+        "tamano": tamano,
+        "texto": (
+            f"Se deja la que está en marcha ({version_actual or actual}) y la anterior, "
+            f"por si hay que arrancar con ella. Hay {len({_RE_KERNEL.match(p).group(1) for p in paquetes if _RE_KERNEL.match(p)})} versiones que se pueden quitar."
+        ),
+    }
+
+
+def _quitar_kernels_viejos(paquetes, contrasena):
+    actual = os.uname().release
+    coincidencia = re.match(r"(\d+\.\d+\.\d+-\d+)", actual)
+    version_actual = coincidencia.group(1) if coincidencia else actual
+    seguros = []
+    for nombre in paquetes:
+        encontrada = _RE_KERNEL.match(nombre)
+        if not encontrada or encontrada.group(1) == version_actual:
+            continue
+        seguros.append(nombre)
+    if not seguros:
+        return "Versiones viejas: no había nada que quitar."
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    entorno["DEBIAN_FRONTEND"] = "noninteractive"
+    try:
+        resultado = subprocess.run(
+            ["sudo", "-S", "-p", "", "apt-get", "purge", "-y", *seguros],
+            input=f"{contrasena}\n",
+            capture_output=True,
+            text=True,
+            timeout=900,
+            env=entorno,
+        )
+    except subprocess.TimeoutExpired:
+        return "Versiones viejas: tardó demasiado y se interrumpió."
+    ok = resultado.returncode == 0
+    registrar(
+        "Versiones viejas del sistema",
+        f"apt-get purge de {len(seguros)} paquetes; se conservó {version_actual}",
+        ok,
+    )
+    if ok:
+        return f"Versiones viejas: OK ({len(seguros)} paquetes)."
+    detalle = (resultado.stderr or resultado.stdout or "error").strip().splitlines()
+    return "Versiones viejas: " + (detalle[-1] if detalle else "error")
 
 
 def _comando_sudo(args, contrasena, timeout=180):
@@ -107,7 +220,7 @@ class LimpiezaEspacio:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Limpieza de espacio en disco")
+        self.root.title("Limpieza De Espacio En Disco")
         _centrar_ventana(self.root, 740, 560)
         self.items = []
         self.vars = {}
@@ -279,6 +392,17 @@ class LimpiezaEspacio:
             "extra": snaps_antiguos,
         })
 
+        viejas = _versiones_viejas()
+        elementos.append({
+            "id": "kernels",
+            "nombre": "Versiones viejas del sistema que ya no se usan",
+            "descripcion": viejas["texto"],
+            "tamano": viejas["tamano"],
+            "sudo": True,
+            "marcado": False,
+            "extra": viejas["paquetes"],
+        })
+
         return elementos
 
     def analizar(self):
@@ -318,7 +442,8 @@ class LimpiezaEspacio:
         recuperable = 0
         for elemento in elementos:
             recuperable += elemento["tamano"]
-            var = tk.BooleanVar(value=elemento["tamano"] > 0)
+            activo = elemento["tamano"] > 0 or bool(elemento.get("extra"))
+            var = tk.BooleanVar(value=bool(elemento.get("marcado", True)) and activo)
             self.vars[elemento["id"]] = var
             texto = (
                 f"{elemento['nombre']}  —  {_formato_tamano(elemento['tamano'])}\n"
@@ -332,7 +457,7 @@ class LimpiezaEspacio:
                 anchor="w",
                 wraplength=640,
             )
-            if elemento["tamano"] <= 0:
+            if not activo:
                 casilla.config(state=tk.DISABLED)
                 var.set(False)
             casilla.pack(fill=tk.X, pady=4, anchor="w")
@@ -413,6 +538,8 @@ class LimpiezaEspacio:
                                     tipo="args",
                                 )
                         mensajes.append("Snaps: " + ("OK" if not errores else "falló " + ", ".join(errores)))
+                    elif item["id"] == "kernels":
+                        mensajes.append(_quitar_kernels_viejos(item.get("extra") or [], contrasena))
                 except Exception as error:
                     mensajes.append(f"{item['nombre']}: {error}")
             self.root.after(0, lambda m=mensajes: self._fin_limpieza(m))
@@ -432,7 +559,7 @@ class SaludDiscos:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Salud de discos (SMART)")
+        self.root.title("Salud De Discos (SMART)")
         _centrar_ventana(self.root, 780, 560)
         self.discos = []
 
@@ -614,8 +741,9 @@ class ServiciosSystemd:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Servicios systemd")
-        _centrar_ventana(self.root, 860, 580)
+        self.root.title("Servicios Systemd")
+        _centrar_ventana(self.root, 1120, 580)
+        self.root.minsize(1120, 580)
         self.servicios = []
 
         marco_buscar = tk.Frame(self.root)
@@ -659,13 +787,8 @@ class ServiciosSystemd:
         self.tree.tag_configure("failed", foreground="red")
         self.tree.tag_configure("inactive", foreground="gray")
 
-        scroll = ttk.Scrollbar(cuerpo, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scroll.set)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll.pack(side=tk.LEFT, fill=tk.Y)
-
         marco_botones = tk.Frame(cuerpo)
-        marco_botones.pack(side=tk.LEFT, fill=tk.Y, padx=(10, 0))
+        marco_botones.pack(side=tk.RIGHT, fill=tk.Y, padx=(10, 0))
         acciones = [
             ("Iniciar", "start", "Inicia el servicio seleccionado"),
             ("Detener", "stop", "Detiene el servicio seleccionado"),
@@ -681,8 +804,13 @@ class ServiciosSystemd:
                 width=16,
                 command=lambda a=accion: self._accion(a),
             )
-            boton.pack(pady=4)
+            boton.pack(pady=4, fill=tk.X)
             ToolTip(boton, tip)
+
+        scroll = ttk.Scrollbar(cuerpo, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         _aplicar_tema(self.root)
         self.cargar()
@@ -1168,4 +1296,782 @@ class Impresoras:
             "No se encontró el configurador. Abre http://localhost:631 en el navegador.",
             parent=self.root,
         )
+
+
+_TIPOS_DISCO = {
+    "ext2", "ext3", "ext4", "btrfs", "xfs", "ntfs", "ntfs3", "vfat", "exfat",
+    "f2fs", "bcachefs", "zfs", "jfs", "reiserfs", "udf",
+}
+_LIMITE_CARPETAS = 300
+
+
+def _es_disco_real(origen, tipo, montaje):
+    if tipo not in _TIPOS_DISCO:
+        return False
+    if origen.startswith("/dev/loop"):
+        return False
+    if montaje.startswith(("/snap/", "/run/", "/sys/", "/proc/", "/dev/")):
+        return False
+    return True
+
+
+def parsear_df(salida):
+    """Interpreta la salida de df --output=source,fstype,size,used,avail,pcent,target."""
+    discos = []
+    for linea in (salida or "").splitlines()[1:]:
+        partes = linea.split(None, 6)
+        if len(partes) < 7:
+            continue
+        origen, tipo, total, usado, libre, porcentaje, montaje = partes
+        montaje = os.path.normpath(montaje.strip())
+        if not _es_disco_real(origen, tipo, montaje):
+            continue
+        try:
+            total_n = int(total)
+            usado_n = int(usado)
+            libre_n = int(libre)
+        except ValueError:
+            continue
+        try:
+            pct = int(str(porcentaje).strip().rstrip("%"))
+        except ValueError:
+            pct = int((usado_n / total_n) * 100) if total_n else 0
+        discos.append({
+            "origen": origen,
+            "tipo": tipo,
+            "total": total_n,
+            "usado": usado_n,
+            "libre": libre_n,
+            "porcentaje": pct,
+            "montaje": montaje,
+        })
+    discos.sort(key=lambda disco: (disco["porcentaje"], disco["usado"]), reverse=True)
+    return discos
+
+
+def listar_uso_discos():
+    proceso = _comando([
+        "df", "-B1",
+        "--output=source,fstype,size,used,avail,pcent,target",
+        "--local",
+    ])
+    discos = parsear_df(proceso.stdout) if proceso.returncode == 0 else []
+    if discos:
+        return discos
+    respaldo = []
+    vistos = set()
+    for punto in ("/", os.path.expanduser("~")):
+        punto = os.path.normpath(punto)
+        if punto in vistos:
+            continue
+        vistos.add(punto)
+        try:
+            uso = shutil.disk_usage(punto)
+        except OSError:
+            continue
+        pct = int((uso.used / uso.total) * 100) if uso.total else 0
+        respaldo.append({
+            "origen": punto,
+            "tipo": "",
+            "total": uso.total,
+            "usado": uso.used,
+            "libre": uso.free,
+            "porcentaje": pct,
+            "montaje": punto,
+        })
+    return respaldo
+
+
+def parsear_du(salida, ruta):
+    """Tamaños de las carpetas hijas. La línea de la propia ruta es el total."""
+    ruta_norm = os.path.normpath(ruta)
+    carpetas = []
+    total = 0
+    for linea in (salida or "").splitlines():
+        if "\t" not in linea:
+            continue
+        tam_txt, path = linea.split("\t", 1)
+        path = os.path.normpath(path.strip())
+        try:
+            tam = int(tam_txt)
+        except ValueError:
+            continue
+        if path == ruta_norm:
+            total = tam
+            continue
+        carpetas.append({
+            "ruta": path,
+            "nombre": os.path.basename(path) or path,
+            "tamano": tam,
+            "es_dir": True,
+        })
+    return carpetas, total
+
+
+def parsear_archivos(salida):
+    archivos = []
+    for linea in (salida or "").splitlines():
+        if "\t" not in linea:
+            continue
+        tam_txt, path = linea.split("\t", 1)
+        path = os.path.normpath(path.strip())
+        try:
+            tam = int(tam_txt)
+        except ValueError:
+            continue
+        archivos.append({
+            "ruta": path,
+            "nombre": os.path.basename(path) or path,
+            "tamano": tam,
+            "es_dir": False,
+        })
+    return archivos
+
+
+def _texto_porcentaje(valor):
+    if valor >= 10:
+        return f"{valor:.0f} %"
+    if valor >= 0.1:
+        return f"{valor:.1f} %"
+    if valor > 0:
+        return "<0,1 %"
+    return "0 %"
+
+
+def _barra_uso(tamano, maximo, ancho=16):
+    if tamano <= 0 or maximo <= 0:
+        return ""
+    bloques = max(1, round(ancho * tamano / maximo))
+    return "█" * min(ancho, bloques)
+
+
+class EspacioDiscos:
+    """Muestra el espacio de cada disco y las carpetas que más ocupan."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Espacio Ocupado En Disco")
+        _centrar_ventana(self.root, 920, 680)
+        self.discos = []
+        self.entradas = []
+        self.montaje = ""
+        self.ruta = ""
+        self._token = 0
+        self._proceso = None
+        self._lock = threading.Lock()
+        self._silencio = False
+        self._contrasena = None
+        self.root.protocol("WM_DELETE_WINDOW", self._cerrar)
+
+        tk.Label(
+            self.root,
+            text="Espacio de cada disco. Elige uno para ver las carpetas que más ocupan.",
+            font=("Arial", 11, "bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        marco_discos = tk.Frame(self.root)
+        marco_discos.pack(fill=tk.X, padx=12)
+
+        self.tree_discos = ttk.Treeview(
+            marco_discos,
+            columns=("disco", "montaje", "tipo", "ocupado", "total", "libre", "uso"),
+            show="headings",
+            height=5,
+        )
+        self.tree_discos.heading("disco", text="Disco")
+        self.tree_discos.heading("montaje", text="Montaje")
+        self.tree_discos.heading("tipo", text="Tipo")
+        self.tree_discos.heading("ocupado", text="Ocupado")
+        self.tree_discos.heading("total", text="Total")
+        self.tree_discos.heading("libre", text="Libre")
+        self.tree_discos.heading("uso", text="Uso")
+        self.tree_discos.column("disco", width=150)
+        self.tree_discos.column("montaje", width=220)
+        self.tree_discos.column("tipo", width=70)
+        self.tree_discos.column("ocupado", width=100, anchor="e")
+        self.tree_discos.column("total", width=100, anchor="e")
+        self.tree_discos.column("libre", width=100, anchor="e")
+        self.tree_discos.column("uso", width=60, anchor="e")
+        self.tree_discos.tag_configure("ok", foreground="#1e8449")
+        self.tree_discos.tag_configure("warn", foreground="#b36b00")
+        self.tree_discos.tag_configure("fail", foreground="#c0392b")
+        scroll_discos = ttk.Scrollbar(marco_discos, orient="vertical", command=self.tree_discos.yview)
+        self.tree_discos.configure(yscrollcommand=scroll_discos.set)
+        self.tree_discos.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        scroll_discos.pack(side=tk.LEFT, fill=tk.Y)
+        self.tree_discos.bind("<<TreeviewSelect>>", self._al_elegir_disco)
+
+        self.lbl_ruta = tk.Label(self.root, text="", anchor="w", justify=tk.LEFT, font=("Arial", 10))
+        self.lbl_ruta.pack(fill=tk.X, padx=12, pady=(8, 2))
+
+        self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
+        self.progreso.pack(fill=tk.X, padx=12, pady=(0, 6))
+
+        marco_carpetas = tk.Frame(self.root)
+        marco_carpetas.pack(fill=tk.BOTH, expand=True, padx=12)
+
+        self.tree_carpetas = ttk.Treeview(
+            marco_carpetas,
+            columns=("nombre", "tipo", "tamano", "porcentaje", "barra"),
+            show="headings",
+        )
+        self.tree_carpetas.heading("nombre", text="Nombre")
+        self.tree_carpetas.heading("tipo", text="Tipo")
+        self.tree_carpetas.heading("tamano", text="Tamaño")
+        self.tree_carpetas.heading("porcentaje", text="% del disco")
+        self.tree_carpetas.heading("barra", text="")
+        self.tree_carpetas.column("nombre", width=280)
+        self.tree_carpetas.column("tipo", width=100)
+        self.tree_carpetas.column("tamano", width=110, anchor="e")
+        self.tree_carpetas.column("porcentaje", width=90, anchor="e")
+        self.tree_carpetas.column("barra", width=180)
+        self.tree_carpetas.tag_configure("otro", foreground="#2471a3")
+        scroll_carpetas = ttk.Scrollbar(marco_carpetas, orient="vertical", command=self.tree_carpetas.yview)
+        self.tree_carpetas.configure(yscrollcommand=scroll_carpetas.set)
+        self.tree_carpetas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_carpetas.pack(side=tk.LEFT, fill=tk.Y)
+        self.tree_carpetas.bind("<Double-1>", self._entrar_click)
+        self.tree_carpetas.bind("<Return>", self._entrar)
+
+        marco_botones = tk.Frame(self.root)
+        marco_botones.pack(fill=tk.X, padx=12, pady=8)
+
+        self.btn_subir = tk.Button(marco_botones, text="Subir", command=self._subir, state=tk.DISABLED)
+        self.btn_subir.pack(side=tk.LEFT, padx=(0, 6))
+        ToolTip(self.btn_subir, "Vuelve a la carpeta anterior, sin salir de este disco")
+
+        self.btn_actualizar = tk.Button(marco_botones, text="Actualizar", command=self._actualizar)
+        self.btn_actualizar.pack(side=tk.LEFT, padx=6)
+        ToolTip(self.btn_actualizar, "Vuelve a medir el disco seleccionado y la carpeta actual")
+
+        self.con_sudo = tk.BooleanVar(value=False)
+        self.chk_sudo = tk.Checkbutton(
+            marco_botones,
+            text="Incluir carpetas protegidas",
+            variable=self.con_sudo,
+            command=self._cambiar_sudo,
+        )
+        self.chk_sudo.pack(side=tk.LEFT, padx=6)
+        ToolTip(
+            self.chk_sudo,
+            "Mide también carpetas que tu usuario no puede leer, como /root o partes de /var",
+        )
+
+        self.btn_abrir = tk.Button(marco_botones, text="Abrir carpeta", command=self._abrir)
+        self.btn_abrir.pack(side=tk.LEFT, padx=6)
+        ToolTip(self.btn_abrir, "Abre la carpeta seleccionada en el administrador de archivos")
+
+        self.lbl_estado = tk.Label(self.root, text="Leyendo discos...", anchor="w")
+        self.lbl_estado.pack(fill=tk.X, padx=12, pady=(0, 10))
+
+        _aplicar_tema(self.root)
+        self._cargar_discos()
+
+    def _disco_actual(self):
+        return next((disco for disco in self.discos if disco["montaje"] == self.montaje), None)
+
+    def _dentro_del_disco(self, ruta):
+        montaje = os.path.normpath(self.montaje or "/")
+        ruta = os.path.normpath(ruta)
+        if montaje == "/":
+            return ruta.startswith("/")
+        return ruta == montaje or ruta.startswith(montaje + os.sep)
+
+    def _cargar_discos(self):
+        self.lbl_estado.config(text="Leyendo discos...")
+
+        def pintar(discos):
+            if not self.root.winfo_exists():
+                return
+            self.discos = discos
+            self.tree_discos.delete(*self.tree_discos.get_children())
+            if not discos:
+                self.lbl_estado.config(text="No se encontraron discos locales.")
+                return
+            for disco in discos:
+                if disco["porcentaje"] >= 90:
+                    etiqueta = "fail"
+                elif disco["porcentaje"] >= 80:
+                    etiqueta = "warn"
+                else:
+                    etiqueta = "ok"
+                self.tree_discos.insert(
+                    "",
+                    tk.END,
+                    iid=disco["montaje"],
+                    tags=(etiqueta,),
+                    values=(
+                        disco["origen"],
+                        disco["montaje"],
+                        disco["tipo"] or "N/D",
+                        _formato_tamano(disco["usado"]),
+                        _formato_tamano(disco["total"]),
+                        _formato_tamano(disco["libre"]),
+                        f"{disco['porcentaje']} %",
+                    ),
+                )
+            self.tree_discos.selection_set(discos[0]["montaje"])
+            self.tree_discos.focus(discos[0]["montaje"])
+
+        en_hilo(self.root, listar_uso_discos, al_terminar=pintar)
+
+    def _al_elegir_disco(self, _event=None):
+        if self._silencio:
+            return
+        seleccion = self.tree_discos.selection()
+        if not seleccion:
+            return
+        montaje = seleccion[0]
+        if montaje == self.montaje and self.ruta == montaje:
+            return
+        self.montaje = montaje
+        self._analizar(montaje)
+
+    def _cambiar_sudo(self):
+        if self.con_sudo.get():
+            self._contrasena = obtener_contrasena()
+        else:
+            self._contrasena = None
+        if self.ruta:
+            self._analizar(self.ruta)
+
+    def _actualizar(self):
+        def pintar(discos):
+            if not self.root.winfo_exists():
+                return
+            self.discos = discos or self.discos
+            seleccionado = self.montaje
+            self._silencio = True
+            try:
+                self._rellenar_discos(seleccionado)
+            finally:
+                self._silencio = False
+            if self.ruta:
+                self._analizar(self.ruta)
+
+        en_hilo(self.root, listar_uso_discos, al_terminar=pintar)
+
+    def _rellenar_discos(self, seleccionado):
+        self.tree_discos.delete(*self.tree_discos.get_children())
+        for disco in self.discos:
+            if disco["porcentaje"] >= 90:
+                etiqueta = "fail"
+            elif disco["porcentaje"] >= 80:
+                etiqueta = "warn"
+            else:
+                etiqueta = "ok"
+            self.tree_discos.insert(
+                "",
+                tk.END,
+                iid=disco["montaje"],
+                tags=(etiqueta,),
+                values=(
+                    disco["origen"],
+                    disco["montaje"],
+                    disco["tipo"] or "N/D",
+                    _formato_tamano(disco["usado"]),
+                    _formato_tamano(disco["total"]),
+                    _formato_tamano(disco["libre"]),
+                    f"{disco['porcentaje']} %",
+                ),
+            )
+        if seleccionado in self.tree_discos.get_children():
+            self.tree_discos.selection_set(seleccionado)
+            self.tree_discos.focus(seleccionado)
+        elif self.discos:
+            self.tree_discos.selection_set(self.discos[0]["montaje"])
+            self.montaje = self.discos[0]["montaje"]
+            self.ruta = self.montaje
+
+    def _subir(self):
+        if not self.ruta or not self.montaje:
+            return
+        padre = os.path.dirname(os.path.normpath(self.ruta))
+        if not padre or not self._dentro_del_disco(padre) or padre == os.path.normpath(self.ruta):
+            return
+        self._analizar(padre)
+
+    def _entrar_click(self, event):
+        if self.tree_carpetas.identify("region", event.x, event.y) != "cell":
+            return
+        self._entrar()
+
+    def _entrar(self, _event=None):
+        seleccion = self.tree_carpetas.selection()
+        if not seleccion:
+            return
+        ruta = seleccion[0]
+        entrada = next((item for item in self.entradas if item["ruta"] == ruta), None)
+        if not entrada:
+            return
+        if entrada.get("otro_disco"):
+            if ruta in self.tree_discos.get_children():
+                self.tree_discos.selection_set(ruta)
+                self.tree_discos.focus(ruta)
+                self.tree_discos.see(ruta)
+                self.montaje = ruta
+                self._analizar(ruta)
+            return
+        if entrada["es_dir"]:
+            self._analizar(ruta)
+
+    def _abrir(self):
+        seleccion = self.tree_carpetas.selection()
+        ruta = seleccion[0] if seleccion else self.ruta
+        if not ruta:
+            return
+        if os.path.isfile(ruta):
+            ruta = os.path.dirname(ruta)
+        for comando in (["nautilus", ruta], ["xdg-open", ruta]):
+            try:
+                subprocess.Popen(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                continue
+        messagebox.showinfo("Espacio", "No se pudo abrir el administrador de archivos.", parent=self.root)
+
+    def _cerrar(self):
+        self._token += 1
+        self._cancelar_proceso()
+        self.root.destroy()
+
+    def _matar_proceso(self, proceso):
+        if proceso is None or proceso.poll() is not None:
+            return
+        try:
+            os.killpg(proceso.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proceso.kill()
+            except OSError:
+                return
+        try:
+            proceso.wait(timeout=2)
+        except Exception:
+            pass
+
+    def _cancelar_proceso(self):
+        with self._lock:
+            proceso = self._proceso
+            self._proceso = None
+        self._matar_proceso(proceso)
+
+    def _lanzar(self, args, contrasena, timeout, token):
+        entorno = os.environ.copy()
+        entorno["LC_ALL"] = "C"
+        if contrasena:
+            comando = ["sudo", "-S", "-p", "", *args]
+            entrada = f"{contrasena}\n"
+        else:
+            comando = list(args)
+            entrada = None
+        try:
+            proceso = subprocess.Popen(
+                comando,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=entorno,
+                start_new_session=True,
+            )
+        except FileNotFoundError as error:
+            return subprocess.CompletedProcess(comando, 1, "", str(error))
+        descartado = None
+        anterior = None
+        with self._lock:
+            if token != self._token:
+                descartado = proceso
+            else:
+                anterior = self._proceso
+                self._proceso = proceso
+        if descartado is not None:
+            self._matar_proceso(descartado)
+            return subprocess.CompletedProcess(comando, 1, "", "")
+        if anterior is not None and anterior is not proceso:
+            self._matar_proceso(anterior)
+        try:
+            salida, error = proceso.communicate(entrada, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self._matar_proceso(proceso)
+            return subprocess.CompletedProcess(comando, 1, "", "Tiempo de espera agotado.")
+        return subprocess.CompletedProcess(comando, proceso.returncode, salida or "", error or "")
+
+    def _medir(self, ruta, contrasena, token):
+        du = self._lanzar(
+            ["du", "-x", "-B1", "--max-depth=1", "--", ruta],
+            contrasena,
+            600,
+            token,
+        )
+        if token != self._token:
+            return [], 0
+        if du.returncode not in (0, 1) and not (du.stdout or "").strip():
+            detalle = (du.stderr or du.stdout or "No se pudo medir la carpeta.").strip()
+            raise RuntimeError(detalle)
+        archivos = self._lanzar(
+            ["find", ruta, "-maxdepth", "1", "-type", "f", "-printf", "%s\\t%p\\n"],
+            contrasena,
+            120,
+            token,
+        )
+        if token != self._token:
+            return [], 0
+        carpetas, _total = parsear_du(du.stdout, ruta)
+        entradas = carpetas + parsear_archivos(archivos.stdout if archivos.returncode in (0, 1) else "")
+        avisos = (du.stderr or "").lower().count("permission denied")
+        avisos += (archivos.stderr or "").lower().count("permission denied")
+        return entradas, avisos
+
+    def _analizar(self, ruta):
+        ruta = os.path.normpath(ruta)
+        if not self._dentro_del_disco(ruta):
+            return
+        self._token += 1
+        token = self._token
+        self._cancelar_proceso()
+        self.ruta = ruta
+        self.entradas = []
+        self.tree_carpetas.delete(*self.tree_carpetas.get_children())
+        disco = self._disco_actual()
+        texto_disco = ""
+        if disco:
+            texto_disco = (
+                f"{disco['montaje']} · {_formato_tamano(disco['usado'])} de "
+                f"{_formato_tamano(disco['total'])} ({disco['porcentaje']} % ocupado, "
+                f"{_formato_tamano(disco['libre'])} libres)\n"
+            )
+        self.lbl_ruta.config(text=texto_disco + ruta)
+        self.lbl_estado.config(text="Calculando carpetas… en discos grandes puede tardar.")
+        self.progreso.start(12)
+        self.btn_subir.config(state=tk.DISABLED)
+        contrasena = self._contrasena if self.con_sudo.get() else None
+
+        def trabajador():
+            return self._medir(ruta, contrasena, token)
+
+        def pintar(resultado):
+            if token != self._token or not self.root.winfo_exists():
+                return
+            entradas, avisos = resultado
+            self._mostrar_carpetas(entradas, avisos)
+
+        def fallo(error):
+            if token != self._token or not self.root.winfo_exists():
+                return
+            self.progreso.stop()
+            en_raiz = os.path.normpath(self.ruta) == os.path.normpath(self.montaje or self.ruta)
+            self.btn_subir.config(state=tk.DISABLED if en_raiz else tk.NORMAL)
+            self.lbl_estado.config(text="No se pudo calcular el espacio.")
+            messagebox.showerror("Espacio", str(error), parent=self.root)
+
+        threading.Thread(
+            target=lambda: self._hilo_analisis(trabajador, pintar, fallo),
+            daemon=True,
+        ).start()
+
+    def _hilo_analisis(self, trabajador, pintar, fallo):
+        try:
+            resultado = trabajador()
+        except Exception as error:
+            if self.root.winfo_exists():
+                self.root.after(0, lambda e=error: fallo(e))
+            return
+        if self.root.winfo_exists():
+            self.root.after(0, lambda r=resultado: pintar(r))
+
+    def _mostrar_carpetas(self, entradas, avisos):
+        self.progreso.stop()
+        montajes = {disco["montaje"] for disco in self.discos}
+        unicos = {}
+        for entrada in entradas:
+            previa = unicos.get(entrada["ruta"])
+            if previa is None or entrada["tamano"] > previa["tamano"]:
+                unicos[entrada["ruta"]] = entrada
+        entradas = list(unicos.values())
+        for entrada in entradas:
+            entrada["otro_disco"] = entrada["es_dir"] and entrada["ruta"] in montajes and entrada["ruta"] != self.montaje
+        entradas.sort(key=lambda item: item["tamano"], reverse=True)
+        self.entradas = entradas
+        self.tree_carpetas.delete(*self.tree_carpetas.get_children())
+        disco = self._disco_actual()
+        usado = disco["usado"] if disco else 0
+        maximo = entradas[0]["tamano"] if entradas else 0
+        visibles = entradas[:_LIMITE_CARPETAS]
+        for entrada in visibles:
+            if entrada["otro_disco"]:
+                tipo = "Otro disco"
+                etiqueta = ("otro",)
+            elif entrada["es_dir"]:
+                tipo = "Carpeta"
+                etiqueta = ()
+            else:
+                tipo = "Archivo"
+                etiqueta = ()
+            porcentaje = (entrada["tamano"] / usado) * 100 if usado else 0
+            self.tree_carpetas.insert(
+                "",
+                tk.END,
+                iid=entrada["ruta"],
+                tags=etiqueta,
+                values=(
+                    entrada["nombre"],
+                    tipo,
+                    _formato_tamano(entrada["tamano"]),
+                    _texto_porcentaje(porcentaje),
+                    _barra_uso(entrada["tamano"], maximo),
+                ),
+            )
+        en_raiz = os.path.normpath(self.ruta) == os.path.normpath(self.montaje or self.ruta)
+        self.btn_subir.config(state=tk.DISABLED if en_raiz else tk.NORMAL)
+        if not entradas:
+            self.lbl_estado.config(text="Esta carpeta no tiene elementos medibles.")
+            return
+        mayor = entradas[0]
+        porcentaje = (mayor["tamano"] / usado) * 100 if usado else 0
+        texto = (
+            f"{len(entradas)} elementos · lo que más ocupa es {mayor['nombre']} "
+            f"({_formato_tamano(mayor['tamano'])}, {_texto_porcentaje(porcentaje)} del disco)"
+        )
+        if len(entradas) > _LIMITE_CARPETAS:
+            texto += f". Mostrando las {_LIMITE_CARPETAS} mayores"
+        if avisos:
+            texto += ". Hay carpetas sin permiso: marca «Incluir carpetas protegidas»"
+        self.lbl_estado.config(text=texto + ".")
+
+
+def _ufw_instalado():
+    return os.path.isfile("/usr/sbin/ufw") or shutil.which("ufw") is not None
+
+
+def _ufw_activado():
+    """Lee ENABLED de ufw.conf. No hace falta ser administrador para saber si está encendido."""
+    try:
+        with open("/etc/ufw/ufw.conf", encoding="utf-8", errors="replace") as archivo:
+            for linea in archivo:
+                linea = linea.strip()
+                if linea.startswith("ENABLED="):
+                    return linea.split("=", 1)[1].strip().strip('"').lower() == "yes"
+    except OSError:
+        return None
+    return None
+
+
+class Cortafuegos:
+    """Activa o desactiva ufw con una explicación en lenguaje llano."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Cortafuegos")
+        self.root.minsize(520, 320)
+        _centrar_ventana(self.root, 560, 360)
+        self._ocupado = False
+
+        tk.Label(self.root, text="Cortafuegos", font=("Arial", 14, "bold")).pack(pady=(14, 6))
+        self.lbl_estado = tk.Label(self.root, text="Comprobando…", font=("Arial", 12, "bold"))
+        self.lbl_estado.pack(pady=(0, 8))
+        tk.Label(
+            self.root,
+            text=(
+                "Activado: solo entran las conexiones que tú permites. "
+                "El equipo sigue pudiendo salir a Internet.\n\n"
+                "Desactivado: otros equipos de la red pueden intentar conectar con este."
+            ),
+            wraplength=500,
+            justify=tk.LEFT,
+        ).pack(padx=16, pady=(0, 12))
+
+        marco = tk.Frame(self.root)
+        marco.pack(pady=8)
+        self.btn_cambiar = tk.Button(marco, text="Activar", width=16, command=self._activar)
+        self.btn_cambiar.pack(side=tk.LEFT, padx=6)
+        self.tip_cambiar = ToolTip(
+            self.btn_cambiar,
+            "Enciende o apaga el cortafuegos del equipo. Pide confirmación y la contraseña de administrador",
+        )
+        boton_cerrar = tk.Button(marco, text="Cerrar", width=12, command=self.root.destroy)
+        boton_cerrar.pack(side=tk.LEFT, padx=6)
+        ToolTip(boton_cerrar, "Cierra esta ventana")
+
+        _aplicar_tema(self.root)
+        self._mostrar_estado()
+
+    def _mostrar_estado(self):
+        if not _ufw_instalado():
+            self.lbl_estado.config(text="No está instalado.", fg="#c0392b")
+            self.btn_cambiar.config(text="Instalar", command=self._instalar, state=tk.NORMAL)
+            self.tip_cambiar.text = "Instala el cortafuegos ufw"
+            return
+        activo = _ufw_activado()
+        if activo is None:
+            self.lbl_estado.config(text="No se pudo leer el estado.", fg="#c0392b")
+            self.btn_cambiar.config(state=tk.DISABLED)
+            return
+        if activo:
+            self.lbl_estado.config(
+                text="Activado. Solo entran las conexiones que tú permites.",
+                fg="#1e8449",
+            )
+            self.btn_cambiar.config(text="Desactivar", command=self._desactivar, state=tk.NORMAL)
+            self.tip_cambiar.text = "Apaga el cortafuegos. Las conexiones de otros equipos dejarán de filtrarse"
+        else:
+            self.lbl_estado.config(
+                text="Desactivado. Las conexiones de fuera pueden entrar.",
+                fg="#c0392b",
+            )
+            self.btn_cambiar.config(text="Activar", command=self._activar, state=tk.NORMAL)
+            self.tip_cambiar.text = "Enciende el cortafuegos. Solo entrarán las conexiones permitidas"
+
+    def _activar(self):
+        if not confirmar(
+            "Se va a activar el cortafuegos.\n\n"
+            "Solo entrarán las conexiones que ya estén permitidas. "
+            "La salida a Internet no se corta.\n\n"
+            "¿Quieres activarlo?",
+            self.root,
+            "Activar El Cortafuegos",
+        ):
+            return
+        self._aplicar(["ufw", "--force", "enable"], "Activar el cortafuegos")
+
+    def _desactivar(self):
+        if not confirmar(
+            "Se va a desactivar el cortafuegos.\n\n"
+            "Otros equipos podrán intentar conectar con este sin ese filtro.\n\n"
+            "¿Quieres desactivarlo?",
+            self.root,
+            "Desactivar El Cortafuegos",
+        ):
+            return
+        self._aplicar(["ufw", "disable"], "Desactivar el cortafuegos")
+
+    def _instalar(self):
+        if not confirmar(
+            "Se va a instalar el cortafuegos (ufw). Después podrás activarlo.\n\n¿Quieres instalarlo?",
+            self.root,
+            "Instalar El Cortafuegos",
+        ):
+            return
+        self._aplicar(["apt-get", "install", "-y", "ufw"], "Instalar el cortafuegos")
+
+    def _aplicar(self, args, descripcion):
+        if self._ocupado:
+            return
+        self._ocupado = True
+        self.btn_cambiar.config(state=tk.DISABLED)
+        self.lbl_estado.config(text="Espera un momento…", fg="#2471a3")
+
+        def trabajo():
+            return sudo_run(args, descripcion, timeout=180)
+
+        def al_terminar(resultado):
+            self._ocupado = False
+            if not self.root.winfo_exists():
+                return
+            if resultado is not None and resultado.returncode != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo completar la acción.").strip()
+                messagebox.showerror("Cortafuegos", texto, parent=self.root)
+            self._mostrar_estado()
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar)
 
