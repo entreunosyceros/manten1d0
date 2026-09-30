@@ -50,6 +50,8 @@ from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, inter
 import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
 from registro import mostrar_registro
 from bandeja import BandejaSistema, preparar_ventana_app, CLASE_VENTANA
+from cat_vpn import vpn_en_uso
+from tooltip import ToolTip
 
 
 def instalar_dependencias_con_progreso(parent):
@@ -182,8 +184,8 @@ class VentanaPrincipal:
         self.root.protocol("WM_DELETE_WINDOW", self._al_pulsar_cerrar)
         self._bandeja = None
 
-        # Cambiar el color de fondo de la ventana
-        self.root.config(bg="lightgrey")
+        self._categoria_activa = None
+        self.root.config(bg=preferencias.color_fondo())
         
 ##############################################################FUNCIONES PARA MENÚ SUPERIOR##########################################################
 
@@ -268,12 +270,17 @@ class VentanaPrincipal:
 ##################################################################################################################################
 ##############################################MENÚ LATERAL########################################################################
         def menu_lateral():
-            # Crear el menú lateral con categorías
-            self.menu_lateral = tk.Frame(self.root, width=210, bg="lightgrey")
+            barra = preferencias.color_barra()
+            texto = preferencias.color_texto()
+            self.menu_lateral = tk.Frame(self.root, width=220, bg=barra)
+            self.menu_lateral._zona = "barra"
             self.menu_lateral.pack(side="left", fill="y")
             self.menu_lateral.pack_propagate(False)
 
-            # Categorías para el menú lateral
+            marco_nav = tk.Frame(self.menu_lateral, bg=barra)
+            marco_nav._zona = "barra"
+            marco_nav.pack(side="top", fill="both", expand=True, padx=8, pady=(12, 0))
+
             self.categorias = [
                 "Inicio",
                 "Perfil Usuario",
@@ -290,58 +297,91 @@ class VentanaPrincipal:
             for indice, categoria in enumerate(self.categorias, start=1):
                 tecla = "0" if indice == 10 else str(indice)
                 boton = tk.Button(
-                    self.menu_lateral,
+                    marco_nav,
                     text=categoria,
-                    width=20,
                     command=lambda c=categoria: self.mostrar_subcategorias(c),
+                    relief="flat",
+                    borderwidth=0,
+                    highlightthickness=0,
+                    anchor="w",
+                    padx=12,
+                    pady=6,
+                    bg=barra,
+                    fg=texto,
+                    activebackground=preferencias.color_barra_activa(),
+                    activeforeground=texto,
+                    font=preferencias.fuente_ui(11),
+                    cursor="hand2",
                 )
-                boton.pack(pady=5)
+                boton._zona = "barra"
+                boton._nav = categoria
+                boton._nav_activa = False
+                boton.pack(fill="x", pady=2)
                 ToolTip(boton, f"Categoría {categoria} (Alt+{tecla})")
+                preferencias.aplicar_hover(boton)
                 self.botones_categorias.append(boton)
                 self.root.bind_all(
                     f"<Alt-Key-{tecla}>",
                     lambda event, c=categoria: self.mostrar_subcategorias(c),
                 )
-            # Dibujar una línea horizontal
-            self.canvas = tk.Canvas(self.menu_lateral, width=50, height=2, bg="lightgrey", highlightthickness=0)
-            self.canvas.create_line(0, 1, 50, 1, fill="black")
-            self.canvas.pack(pady=10)        
-            # Crear indicador de conexión a Internet
+
+            marco_estado = tk.Frame(self.menu_lateral, bg=barra)
+            marco_estado._zona = "barra"
+            marco_estado.pack(side="bottom", fill="x", padx=8, pady=12)
+
             self.indicador_internet = tk.Label(
-                self.menu_lateral,
+                marco_estado,
                 text="Estado de la conexión",
                 bg="red",
                 fg="white",
-                width=20,
-                height=1,
+                font=preferencias.fuente_ui(9),
+                padx=8,
+                pady=4,
             )
-            
-            self.indicador_internet.pack(pady=(16, 6))
+            self.indicador_internet.pack(fill="x", pady=(0, 8))
             ToolTip(self.indicador_internet, "Estado de la conexión a internet del equipo")
 
             self.lbl_ip_privada = tk.Label(
-                self.menu_lateral,
+                marco_estado,
                 text="IP privada: …",
-                bg="lightgrey",
-                fg="black",
-                font=("Arial", 9),
+                bg=barra,
+                fg=texto,
+                font=preferencias.fuente_ui(9),
                 wraplength=190,
-                justify=tk.CENTER,
+                justify=tk.LEFT,
+                anchor="w",
             )
-            self.lbl_ip_privada.pack(pady=(4, 0))
+            self.lbl_ip_privada._zona = "barra"
+            self.lbl_ip_privada.pack(fill="x", pady=(4, 0))
             ToolTip(self.lbl_ip_privada, "Dirección IP de este equipo en la red local")
 
             self.lbl_ip_publica = tk.Label(
-                self.menu_lateral,
+                marco_estado,
                 text="IP pública: …",
-                bg="lightgrey",
-                fg="black",
-                font=("Arial", 9),
+                bg=barra,
+                fg=texto,
+                font=preferencias.fuente_ui(9),
                 wraplength=190,
-                justify=tk.CENTER,
+                justify=tk.LEFT,
+                anchor="w",
             )
-            self.lbl_ip_publica.pack(pady=(2, 8))
+            self.lbl_ip_publica._zona = "barra"
+            self.lbl_ip_publica.pack(fill="x", pady=(2, 0))
             ToolTip(self.lbl_ip_publica, "Dirección IP pública de la conexión a Internet")
+
+            self.lbl_vpn = tk.Label(
+                marco_estado,
+                text="VPN: …",
+                bg=barra,
+                fg=texto,
+                font=preferencias.fuente_ui(9),
+                wraplength=190,
+                justify=tk.LEFT,
+                anchor="w",
+            )
+            self.lbl_vpn._zona = "barra"
+            self.lbl_vpn.pack(fill="x", pady=(2, 0))
+            self._tip_vpn = ToolTip(self.lbl_vpn, "Indica si el equipo está usando una VPN")
             self._ip_publica_cache = ""
             self._ip_publica_momento = 0
             # Iniciar la verificación de conexión a Internet
@@ -351,28 +391,34 @@ class VentanaPrincipal:
 ############################################################################################################################################        
         
         # Crear el área central para mostrar subcategorías
-        self.area_central = tk.Frame(self.root, bg="lightgrey", borderwidth=0)  # Eliminar el borde
-        self.area_central.pack(side="top", fill="both", expand=True)  # Ajustar el área central
+        self.area_central = tk.Frame(self.root, bg=preferencias.color_fondo(), borderwidth=0)
+        self.area_central.pack(side="top", fill="both", expand=True)
 
-        # Mensaje de bienvenida
         self.label_bienvenida = tk.Label(
             self.area_central,
             text="¡Bienvenid@!\n Comienza haciendo clic\n en una categoría del menú lateral.",
-            font=("Arial", 18, "bold"),
-            bg="lightgrey",
+            font=preferencias.fuente_ui(18, "bold"),
+            bg=preferencias.color_fondo(),
+            fg=preferencias.color_texto(),
         )
         self.label_bienvenida.pack(pady=50)
 
         # Contenedor para el label de subcategorías
         self.frame_subcategorias = tk.Frame(
-            self.area_central, bg="lightgrey", padx=10, pady=10
-        )  # Ajustar el espaciado interno
+            self.area_central, bg=preferencias.color_fondo(), padx=10, pady=10
+        )
         self.frame_subcategorias.pack(
             anchor="n", pady=(0, 20)
         )  # Espaciado en la parte superior y anclar al norte
 
         self.label_subcategorias = tk.Label(
-            self.area_central, text="", font=("Arial", 12), bg="lightgrey", padx=10, pady=0
+            self.area_central,
+            text="",
+            font=preferencias.fuente_ui(12),
+            bg=preferencias.color_fondo(),
+            fg=preferencias.color_texto(),
+            padx=10,
+            pady=0,
         )
         self.label_subcategorias.pack()
 
@@ -448,32 +494,26 @@ class VentanaPrincipal:
         elif categoria == "Sistema":
 
             sistema_cat(self, mensaje_personalizado)
-            if preferencias.tema_seleccionado == "Claro":
-                return
             preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
         elif categoria == "Archivos":
 
             archivos_cat(self, mensaje_personalizado)
-            # Aplicar el tema seleccionado a la nueva ventana
             preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
         elif categoria == "Internet":
 
             internet_cat(self, mensaje_personalizado)
-            # Aplicar el tema seleccionado a la nueva ventana
             preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
         elif categoria == "Red Local":
 
             red_local_cat(self, mensaje_personalizado)
-            # Aplicar el tema seleccionado a la nueva ventana
             preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
         elif categoria == "Navegadores":
 
             navegadores_cat(self, mensaje_personalizado)
-            # Aplicar el tema seleccionado a la nueva ventana
             preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
         else:
@@ -490,8 +530,24 @@ class VentanaPrincipal:
                     text=f"Subcategorías de {categoria}", font=("Arial", 12)
                 )  # Restaurar el texto original
             self.label_subcategorias.pack()  # Mostrar la etiqueta de subcategorías
-            # Aplicar el tema seleccionado a la nueva ventana
-            preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+
+        preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+        self._marcar_categoria(categoria)
+
+    def _marcar_categoria(self, categoria):
+        """Deja visible qué sección del menú lateral está abierta."""
+        self._categoria_activa = categoria
+        for boton in self.botones_categorias:
+            activa = getattr(boton, "_nav", None) == categoria
+            boton._nav_activa = activa
+            fondo = preferencias.color_barra_activa() if activa else preferencias.color_barra()
+            boton.config(
+                background=fondo,
+                foreground=preferencias.color_texto(),
+                activebackground=fondo,
+                activeforeground=preferencias.color_texto(),
+                font=preferencias.fuente_ui(11, "bold" if activa else "normal"),
+            )
 
     # Función para mostrar la información del sistema dentro de la categoría información. Toma los datos de información.py
     def mostrar_informacion_sistema(self):
@@ -682,6 +738,7 @@ class VentanaPrincipal:
             except requests.RequestException:
                 conectado = False
             privada = Informacion.obtener_direccion_ip_local()
+            _vpn_activa, vpn_texto, vpn_detalle = vpn_en_uso()
             if conectado:
                 ahora = time.time()
                 if not self._ip_publica_cache or ahora - self._ip_publica_momento > 120:
@@ -690,11 +747,11 @@ class VentanaPrincipal:
                     self._ip_publica_momento = ahora
                 else:
                     publica = self._ip_publica_cache
-                estado = ("green", "Conexión establecida", privada, publica)
+                estado = ("green", "Conexión establecida", privada, publica, vpn_texto, vpn_detalle)
             else:
                 self._ip_publica_cache = ""
                 self._ip_publica_momento = 0
-                estado = ("red", "Sin conexión", privada, "No disponible")
+                estado = ("red", "Sin conexión", privada, "No disponible", vpn_texto, vpn_detalle)
             try:
                 self.root.after(0, lambda e=estado: self._aplicar_estado_internet(*e))
             except RuntimeError:
@@ -702,7 +759,7 @@ class VentanaPrincipal:
 
         threading.Thread(target=trabajador, daemon=True).start()
 
-    def _aplicar_estado_internet(self, color, texto, privada, publica):
+    def _aplicar_estado_internet(self, color, texto, privada, publica, vpn_texto="VPN: …", vpn_detalle=""):
         if not self.root.winfo_exists():
             return
         self.indicador_internet.config(bg=color, text=texto)
@@ -710,6 +767,10 @@ class VentanaPrincipal:
             self.lbl_ip_privada.config(text=f"IP privada: {privada}")
         if self.lbl_ip_publica.winfo_exists():
             self.lbl_ip_publica.config(text=f"IP pública: {publica}")
+        if getattr(self, "lbl_vpn", None) is not None and self.lbl_vpn.winfo_exists():
+            self.lbl_vpn.config(text=vpn_texto)
+            if vpn_detalle and getattr(self, "_tip_vpn", None) is not None:
+                self._tip_vpn.text = vpn_detalle
         self._internet_check_after_id = self.root.after(10000, self._comprobar_internet)
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Avisos del panel de inicio: actualizaciones, disco, SMART y conexión."""
+"""Avisos del panel de inicio: actualizaciones, disco, SMART, conexión y temperatura."""
 
 import os
 import re
@@ -6,6 +6,13 @@ import shutil
 import subprocess
 
 import requests
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+_CHIPS_CPU = ("coretemp", "k10temp", "cpu_thermal", "cpu-thermal", "zenpower", "atk0110")
 
 
 def _comando(args, timeout=20):
@@ -30,11 +37,15 @@ def recoger_avisos():
     avisos.extend(_aviso_reinicio())
     avisos.extend(_aviso_actualizaciones())
     avisos.extend(_aviso_smart())
+    avisos.extend(_aviso_temperatura())
     if not avisos:
         avisos.append({
             "nivel": "ok",
             "titulo": "Todo en orden",
-            "detalle": "No hay avisos de disco, reinicio, actualizaciones, SMART ni conexión.",
+            "detalle": (
+                "No hay avisos de disco, reinicio, actualizaciones, SMART, "
+                "conexión ni temperatura."
+            ),
             "destino": None,
         })
     return avisos
@@ -280,6 +291,176 @@ def _aviso_smart():
             "destino": "Sistema",
         })
     return avisos
+
+
+def _lectura_valida(sensor):
+    """Descarta lecturas absurdas (p. ej. high/critical absurdos de algunos NVMe)."""
+    try:
+        actual = float(sensor.current)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    if actual < -20 or actual > 125:
+        return False
+    high = getattr(sensor, "high", None)
+    critical = getattr(sensor, "critical", None)
+    for limite in (high, critical):
+        if limite is None:
+            continue
+        try:
+            if float(limite) > 200:
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _elegir_sensor_cpu(temperaturas):
+    """Elige el sensor de CPU más representativo entre los chips conocidos."""
+    preferidos = []
+    for chip in _CHIPS_CPU:
+        if chip not in temperaturas:
+            continue
+        for sensor in temperaturas[chip]:
+            if not _lectura_valida(sensor):
+                continue
+            etiqueta = (getattr(sensor, "label", None) or "").strip().lower()
+            preferidos.append((chip, sensor, etiqueta))
+    if preferidos:
+        for chip, sensor, etiqueta in preferidos:
+            if etiqueta == "package id 0" or etiqueta.startswith("tctl"):
+                return chip, sensor
+        return preferidos[0][0], preferidos[0][1]
+
+    candidatos = []
+    for chip, sensores in temperaturas.items():
+        chip_l = chip.lower()
+        if chip_l.startswith("nvme") or "amdgpu" in chip_l:
+            continue
+        for sensor in sensores:
+            if not _lectura_valida(sensor):
+                continue
+            candidatos.append((chip, sensor))
+    if not candidatos:
+        return None, None
+    return max(candidatos, key=lambda par: float(par[1].current))
+
+
+def _temperatura_sysfs():
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp", encoding="utf-8") as archivo:
+            return int(archivo.read().strip()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+def _leer_temperatura_cpu():
+    """Devuelve dict con current/high/critical o None si no hay sensores."""
+    if psutil is not None:
+        try:
+            temperaturas = psutil.sensors_temperatures() or {}
+        except Exception:
+            temperaturas = {}
+        if temperaturas:
+            _chip, sensor = _elegir_sensor_cpu(temperaturas)
+            if sensor is not None:
+                high = getattr(sensor, "high", None)
+                critical = getattr(sensor, "critical", None)
+                try:
+                    high = float(high) if high is not None and float(high) <= 200 else None
+                except (TypeError, ValueError):
+                    high = None
+                try:
+                    critical = (
+                        float(critical) if critical is not None and float(critical) <= 200 else None
+                    )
+                except (TypeError, ValueError):
+                    critical = None
+                return {
+                    "current": float(sensor.current),
+                    "high": high,
+                    "critical": critical,
+                }
+    valor = _temperatura_sysfs()
+    if valor is None:
+        return None
+    return {"current": valor, "high": None, "critical": None}
+
+
+def _leer_ventiladores():
+    """Lista de (nombre, rpm). Vacía si no hay sensores de ventilador."""
+    if psutil is None or not hasattr(psutil, "sensors_fans"):
+        return []
+    try:
+        fans = psutil.sensors_fans() or {}
+    except Exception:
+        return []
+    resultado = []
+    for chip, entradas in fans.items():
+        for entrada in entradas:
+            try:
+                rpm = int(entrada.current)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            etiqueta = (getattr(entrada, "label", None) or "").strip() or chip
+            resultado.append((etiqueta, rpm))
+    return resultado
+
+
+def _aviso_temperatura():
+    datos = _leer_temperatura_cpu()
+    if datos is None:
+        return []
+
+    actual = datos["current"]
+    high = datos["high"]
+    critical = datos["critical"]
+    umbral_aviso = high if high is not None else 75.0
+    umbral_error = critical if critical is not None else 90.0
+
+    if actual >= umbral_error:
+        nivel = "error"
+        titulo = "El equipo está muy caliente"
+    elif actual >= umbral_aviso:
+        nivel = "aviso"
+        titulo = "El equipo va caliente"
+    else:
+        nivel = "info"
+        titulo = "Temperatura del equipo"
+
+    partes = [f"CPU {actual:.0f} °C"]
+    if high is not None:
+        partes.append(f"aviso del sensor a {high:.0f} °C")
+    elif critical is not None:
+        partes.append(f"crítico del sensor a {critical:.0f} °C")
+
+    fans = _leer_ventiladores()
+    fan_parado = False
+    if fans:
+        textos_fan = []
+        for nombre, rpm in fans[:3]:
+            textos_fan.append(f"{nombre} {rpm} rpm")
+            if rpm == 0 and nivel in ("aviso", "error"):
+                fan_parado = True
+        partes.append("Ventilador: " + ", ".join(textos_fan))
+        if len(fans) > 3:
+            partes.append(f"y {len(fans) - 3} más")
+
+    if fan_parado:
+        if nivel == "aviso":
+            nivel = "error"
+            titulo = "El equipo está muy caliente"
+        partes.append("hay un ventilador a 0 rpm")
+
+    if len(partes) == 1:
+        detalle = partes[0] + ". Pulsa para ver la información del equipo."
+    else:
+        detalle = partes[0] + " (" + "; ".join(partes[1:]) + "). Pulsa para ver la información del equipo."
+    return [{
+        "nivel": nivel,
+        "titulo": titulo,
+        "detalle": detalle,
+        "destino": "Información",
+    }]
 
 
 def _tamano(nbytes):

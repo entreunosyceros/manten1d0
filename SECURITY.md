@@ -34,7 +34,7 @@ Incluye, en la medida de lo posible:
 - Descripción del problema y módulo afectado (`password.py`, `registro.py`, `cat_red_extra.py`, etc.).
 - Pasos para reproducirlo (sin secretos reales).
 - Impacto estimado (privilegios, datos locales, ejecución de comandos).
-- Versión (`config.ini`, p. ej. 0.6.0) o commit afectado.
+- Versión (`config.ini`, p. ej. 0.7.0) o commit afectado.
 - Versión de Ubuntu y si usas código fuente o el paquete `.deb`.
 - Sugerencia de mitigación, si la tienes.
 

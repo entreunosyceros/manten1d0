@@ -59,7 +59,7 @@ python3 -m compileall -q .
 | `tooltip.py` | Tooltips (desaparecen al salir el ratón) |
 | `bandeja.py` | Icono de bandeja (proceso Qt aparte) |
 | `preferencias.py` | Tema claro/oscuro y tamaño de texto |
-| `avisos.py` | Avisos de Inicio (disco, APT, SMART, Internet) |
+| `avisos.py` | Avisos de Inicio (disco, APT, SMART, Internet, temperatura) |
 | `documentacion.py` / `about.py` | Ayuda y Acerca de |
 | `actualizaciones.py` | Búsqueda de versiones en GitHub Releases |
 | `cat_sistema.py`, `cat_sistema_extra.py` | Sistema: limpiezas, SMART, servicios, impresoras… |

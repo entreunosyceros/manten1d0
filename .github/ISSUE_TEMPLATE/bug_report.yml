@@ -37,7 +37,7 @@ body:
     attributes:
       label: Versión
       description: Versión de Manten1d0 (`config.ini` o Acerca de) o commit si ejecutas desde código fuente
-      placeholder: "0.6.0"
+      placeholder: "0.7.0"
     validations:
       required: true
 

@@ -4,7 +4,7 @@
 ------------------------------------------------------------------
 * Manten1d0: sistema de mantenimiento básico y otras herramientas para Ubuntu.
 * Creado con: Python 3.10.12
-* Versión actual del programa: **0.6.0**
+* Versión actual del programa: **0.7.0**
 * Probado en: Ubuntu 22.04
 ------------------------------------------------------------------
 Esto es un pequeño programa para realizar el mantenimiento básico de Ubuntu, y que así no me toquen las narices todos los días cuando quiere instalar un programa, llega una actualización del sistema y cosas por el estilo.
@@ -13,12 +13,13 @@ La contraseña de sudo se pide una vez al iniciar y se guarda cifrada. Las accio
 
 Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
-## Características de la versión 0.6.0
+## Características de la versión 0.7.0
 
 ### Inicio
 
+- Barra lateral plana: la categoría activa queda marcada; los botones responden al pasar el ratón (también en tema oscuro).
 - Logo `Manten1do.png` a tamaño del área disponible.
-- Avisos de estado: Internet, disco raíz o carpeta personal (>80 % / >90 %, con las tres carpetas que más ocupan y qué se puede borrar sin miedo), reinicio pendiente tras una actualización, actualizaciones APT (incluidas las de seguridad) y problemas SMART si `smartctl` está disponible.
+- Avisos de estado: Internet, disco raíz o carpeta personal (>80 % / >90 %, con las tres carpetas que más ocupan y qué se puede borrar sin miedo), reinicio pendiente tras una actualización, actualizaciones APT (incluidas las de seguridad), problemas SMART si `smartctl` está disponible, y **temperatura de CPU** (y ventiladores si hay sensores; aviso si va caliente).
 - Pulsar un aviso abre la categoría relacionada. El de reinicio pide confirmación y reinicia el equipo. Se puede actualizar la lista o abrir el registro de acciones.
 
 ### Perfil de usuario
@@ -40,7 +41,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 <img width="796" height="771" alt="sisetma" src="https://github.com/user-attachments/assets/c20c5012-dfce-44f4-a327-807bcd7a06ca" />
 
-- Actualizar, limpiar caché APT, gestor de software, autostart, borrar archivos, vaciar papelera, procesos, duplicados, repositorios/PPA, monitorización, instalar `.deb`, desinstalar paquetes, logs, limpieza de disco (incluye **versiones viejas del sistema que ya no se usan**; esa casilla llega desmarcada y conserva la versión en marcha y la anterior), SMART, servicios systemd, **espacio de cada disco** (carpetas que más ocupan) y **cortafuegos** (activar o desactivar ufw: activado, solo entran las conexiones que tú permites; si falta, se puede instalar desde ahí).
+- Las acciones están agrupadas en **poner al día**, **espacio**, **el equipo** y **al arrancar**: actualizar, limpiar caché APT, gestor de software, autostart, borrar archivos, vaciar papelera, procesos, duplicados, repositorios/PPA, monitorización, instalar `.deb`, desinstalar paquetes, logs, limpieza de disco (incluye **versiones viejas del sistema que ya no se usan**; esa casilla llega desmarcada y conserva la versión en marcha y la anterior), **Snap y Flatpak** (listar con el espacio que ocupan, actualizar o desinstalar; van aparte de APT; si falta Flatpak se puede instalar desde ahí), SMART, servicios systemd, **servicios que fallan** (listar, reiniciar o ver un log corto), **espacio de cada disco** (carpetas que más ocupan), **Bluetooth** (dispositivos emparejados, olvidar uno o reiniciar el servicio) y **cortafuegos** (activar o desactivar ufw; reglas frecuentes: SSH, Samba o solo la red local; si falta ufw se puede instalar desde ahí).
 - **Historial de comandos**: vuelve a lanzar limpiezas y acciones ya ejecutadas, con confirmación.
 - **Impresoras**: busca equipos USB o de la red local, lista las colas de CUPS, página de prueba y abre la configuración del sistema.
 
@@ -48,6 +49,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 <img width="799" height="766" alt="archivo" src="https://github.com/user-attachments/assets/03f7587a-ed85-42f1-b42a-0ccc29b46452" />
 
+- Las acciones están agrupadas en **copias**, **proteger**, **organizar** y **comprobar y liberar**.
 - **Copiar a un USB**: Documentos o el escritorio, en una carpeta con la fecha en el nombre. Si el USB no está abierto, se monta; si no cabe, avisa y no copia. La restauración de un `.gz` antiguo sigue disponible. Cifrado/descifrado, búsqueda y renombrado masivo.
 - **Permisos y propietario** (chmod/chown, también recursivo).
 - **USB / discos**: listar, montar y desmontar (udisksctl).
@@ -58,19 +60,21 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 <img width="906" height="771" alt="internet" src="https://github.com/user-attachments/assets/eb98713d-61bf-485f-81de-ed81493eac2f" />
 
-- Reiniciar interfaz, ping, escaneo de puertos, test de velocidad, diagnóstico (traceroute/netstat) y **nivel de ruido** (SNR Wi-Fi, jitter y pérdida de paquetes).
+- Acciones agrupadas en **conexión**, **ajustes de red** y **herramientas**.
+- Reiniciar interfaz, ping, escaneo de puertos, **puerto desde Internet** (aviso de riesgos; escucha local + comprobación en el navegador), test de velocidad, diagnóstico (traceroute/netstat) y **nivel de ruido** (SNR Wi-Fi, jitter y pérdida de paquetes).
 - **Wi-Fi** con nmcli (listar, conectar, desconectar; la clave no se guarda en el registro).
 - **DNS**: router (DHCP), Cloudflare `1.1.1.1` o Google `8.8.8.8`.
 - **Editor de `/etc/hosts`** con validación y copia `.bak` al guardar.
 - **VPN**: solo **ExpressVPN** (si `expressvpnctl` está instalado). Estado, conectar o desconectar, región, protocolo, bloqueo de red, red local, arranque automático y túnel dividido. La sesión sigue en la aplicación oficial. NordVPN, Surfshark, Proton VPN, CyberGhost, Mullvad y el resto no se gestionan aquí.
-- El indicador del menú lateral muestra si hay Internet y, debajo, la IP privada (la de la red de casa, no la del túnel VPN) y la IP pública.
+- El indicador del menú lateral muestra si hay Internet y, debajo, la IP privada (la de la red de casa, no la del túnel VPN), la IP pública y si hay **VPN** activa (ExpressVPN o túnel típico).
 
 ### Red local
 
 <img width="907" height="770" alt="red-local" src="https://github.com/user-attachments/assets/9973bf20-5c61-41ec-acad-663b4487deb9" />
 
-- Listado de equipos con **IP, nombre, MAC** y si comparte **Samba**.
+- Listado de equipos con **IP, nombre, MAC** y si comparte **Samba** (**quién hay en la red**, Wi‑Fi o cable; no hace falta entrar en el router).
 - Doble clic abre `smb://` en el administrador de archivos si está disponible.
+- **¿Responde el router?**: ping a la puerta de enlace y acceso a su página de configuración.
 - **Compartir carpeta**: otro equipo de casa puede ver una carpeta tuya (solo lectura, o también modificar), sin contraseña. Si el cortafuegos está activado, pregunta si hay que permitir Samba.
 - **Encender un PC**: señal de encendido por red a un equipo guardado al buscar la red, o a una MAC anotada, si su placa lo permite.
 
@@ -78,6 +82,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 <img width="904" height="826" alt="nevagadores" src="https://github.com/user-attachments/assets/def51d5e-947e-426e-bc6a-84c2e65801bf" />
 
+- Acciones agrupadas en **abrir**, **instalar**, **limpiar** y **perfiles**.
 - Chrome, Firefox, Edge, **Brave, Chromium y Vivaldi**: abrir (también privado), instalar y limpiar caché/historial.
 - **Perfiles y marcadores**: lista perfiles locales y exporta marcadores a HTML.
 
@@ -93,9 +98,9 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Ayuda y menús
 
-- Menú **Ayuda**: documentación de todas las opciones y ventana Acerca de (versión 0.6.0).
+- Menú **Ayuda**: documentación de todas las opciones y ventana Acerca de (versión 0.7.0).
 - Archivo: terminal, abrir URL, salir.
-- Preferencias: tema claro, o el tema oscuro del sistema (GTK), tamaño de texto, actualizaciones, repositorio GitHub, registro de acciones y atajos **Alt+1 … Alt+0**.
+- Preferencias: tema claro, o el tema oscuro del sistema (GTK), paleta más suave, tamaño de texto, actualizaciones, repositorio GitHub, registro de acciones (con opción de **vaciarlo** sin tocar el historial de comandos repetibles) y atajos **Alt+1 … Alt+0**.
 
 ## Dependencias imprescindibles
 
@@ -123,7 +128,7 @@ bash packaging/build-deb.sh
 En una terminal (`Ctrl+Alt+T`):
 
 ```
-sudo apt install -f ./manten1d0_0.6.0_all.deb
+sudo apt install -f ./manten1d0_0.7.0_all.deb
 ```
 
 o, como indica el nombre corto:

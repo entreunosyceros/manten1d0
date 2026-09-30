@@ -27,6 +27,7 @@ from PIL import Image, ImageTk
 
 from password import limpiar_archivos_configuracion, obtener_contrasena
 from tooltip import ToolTip
+import preferencias
 
 
 def datos_perfil_actual():
@@ -93,8 +94,10 @@ def _foto_perfil(ruta, tamano=(120, 120)):
     return ImageTk.PhotoImage(imagen)
 
 
-def crear_panel_perfil(parent, fondo="lightgrey"):
+def crear_panel_perfil(parent, fondo=None):
     """Muestra en un marco los datos actuales del perfil que se pueden consultar o cambiar."""
+    if fondo is None:
+        fondo = preferencias.color_fondo()
     datos = datos_perfil_actual()
     marco = tk.Frame(parent, bg=fondo)
     tarjeta = tk.Frame(marco, bg=fondo)

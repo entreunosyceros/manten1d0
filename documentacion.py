@@ -28,7 +28,8 @@ SECCIONES = (
         "Buscar Actualizaciones: comprueba si hay una versión nueva del programa.\n\n"
         "Opciones: cambia el tema (claro, o el oscuro del sistema) y el tamaño del texto.\n\n"
         "Registro de acciones: muestra el historial de operaciones realizadas "
-        "(sin guardar la contraseña de sudo).\n\n"
+        "(sin guardar la contraseña de sudo). Desde esa ventana se puede vaciar el registro "
+        "con confirmación; no borra el historial de comandos repetibles.\n\n"
         "Atajos de teclado: resumen de Alt+1 a Alt+0 para saltar entre categorías.",
     ),
     (
@@ -55,7 +56,10 @@ SECCIONES = (
         "• Hay que reiniciar el equipo (si una actualización lo pide). Al pulsarlo, "
         "pide confirmación y reinicia.\n"
         "• Actualizaciones de APT pendientes, incluidas las de seguridad.\n"
-        "• Problemas SMART en los discos (si smartctl está disponible).\n\n"
+        "• Problemas SMART en los discos (si smartctl está disponible).\n"
+        "• Temperatura de CPU (y ventiladores si hay sensores): informativo en frío, "
+        "aviso si se acerca al límite del sensor y error si está muy caliente o un "
+        "ventilador va a 0 rpm. Al pulsarlo abre Información.\n\n"
         "Al pulsar un aviso se abre la categoría relacionada. El de reinicio pide confirmación y reinicia el equipo.\n"
         "Actualizar avisos vuelve a comprobar el estado.\n"
         "Ver registro de acciones abre el mismo historial que Preferencias.",
@@ -84,7 +88,8 @@ SECCIONES = (
     ),
     (
         "Sistema",
-        "Herramientas de mantenimiento del sistema operativo:\n\n"
+        "Herramientas de mantenimiento del sistema operativo, agrupadas en "
+        "poner al día, espacio, el equipo, y al arrancar:\n\n"
         "Actualizar Sistema: instala las actualizaciones APT disponibles.\n"
         "Limpiar Caché: vacía la caché de paquetes.\n"
         "Abrir Gestor Software: lanza el centro de software de Ubuntu (snaps).\n"
@@ -104,6 +109,8 @@ SECCIONES = (
         "Se conserva la versión que está en marcha y la anterior.\n"
         "Salud discos: estado SMART, temperatura y avisos de fallo.\n"
         "Servicios: iniciar, detener, reiniciar, habilitar o deshabilitar unidades systemd.\n"
+        "Servicios que fallan: lista solo las unidades que systemd marca como fallidas, "
+        "permite reiniciar la seleccionada o ver las últimas líneas del registro (journalctl).\n"
         "Historial comandos: lista las limpiezas y acciones ya ejecutadas para repetirlas "
         "con confirmación. No guarda la contraseña de sudo.\n"
         "Impresoras: busca impresoras enchufadas por USB o anunciadas en la red local "
@@ -113,10 +120,20 @@ SECCIONES = (
         "Al elegir uno, lista las carpetas que más ocupan. Doble clic entra en una "
         "carpeta. No cruza a otro disco montado dentro. La casilla de carpetas "
         "protegidas vuelve a medir con sudo las rutas que el usuario no puede leer.\n"
+        "Snap y Flatpak: lista las aplicaciones Snap y Flatpak con el espacio que "
+        "ocupan (van aparte de APT). Permite actualizar una, actualizar todas según "
+        "el filtro, o desinstalar. Si Flatpak no está instalado, la misma ventana "
+        "puede instalarlo.\n"
+        "Bluetooth: lista los dispositivos emparejados, indica si están conectados, "
+        "permite olvidar uno que no conecta y reiniciar el servicio Bluetooth "
+        "(como apagar y encender). No empareja dispositivos nuevos: eso se hace "
+        "desde los ajustes de Ubuntu.\n"
         "Cortafuegos: enciende o apaga el cortafuegos del equipo (ufw). "
         "Activado significa que solo entran las conexiones que tú permites; "
         "la salida a Internet no se corta. Pide confirmación y la contraseña de administrador. "
-        "Si ufw no está instalado, la misma ventana puede instalarlo.",
+        "Si ufw no está instalado, la misma ventana puede instalarlo. "
+        "También permite reglas frecuentes sin editar ufw a mano: permitir o quitar SSH, "
+        "Samba (carpetas compartidas) y el acceso solo desde tu red local detectada.",
     ),
     (
         "Archivos",
@@ -126,6 +143,7 @@ SECCIONES = (
         "Si no cabe, avisa y no copia.\n"
         "Restaurar Copia de Seguridad: extrae un archivo .gz antiguo en la carpeta que elijas "
         "(puede sobrescribir archivos).\n\n"
+        "Las acciones están agrupadas en copias, proteger, organizar, y comprobar y liberar.\n\n"
         "Cifrar Archivos / Descifrar Archivos: protege o recupera ficheros con cifrado.\n\n"
         "Busca archivos: localiza ficheros en el sistema por nombre.\n"
         "Renombrar archivos: cambia el nombre de muchos ficheros a la vez.\n\n"
@@ -136,7 +154,8 @@ SECCIONES = (
     ),
     (
         "Internet",
-        "Selecciona una interfaz de red para trabajar con ella.\n\n"
+        "Selecciona una interfaz de red para trabajar con ella. Las acciones están "
+        "agrupadas en conexión, ajustes de red y herramientas.\n\n"
         "Reiniciar Tarjeta de Red: baja y vuelve a levantar la interfaz (pide confirmación).\n"
         "Hacer Ping: comprueba si una URL o host responde.\n"
         "Redes Wi-Fi: lista redes con nmcli, conecta (pidiendo clave si hace falta) o desconecta.\n"
@@ -148,19 +167,28 @@ SECCIONES = (
         "La sesión se inicia y se cierra en la aplicación oficial de ExpressVPN. "
         "NordVPN, Surfshark, Proton VPN, CyberGhost, Mullvad y otros clientes no se configuran desde aquí.\n"
         "Escanear Puertos: revisa puertos abiertos de una IP.\n"
+        "Puerto desde Internet: con aviso de riesgos, muestra tu IP pública, "
+        "comprueba si este PC escucha un puerto y abre una página web para "
+        "probar si ese puerto es alcanzable desde fuera. No escanea redes ajenas.\n"
         "Test Velocidad: mide descarga y subida de la conexión.\n"
         "Diagnóstico Red: traceroute y netstat para ver por dónde falla la conectividad.\n"
         "Nivel de ruido: en Wi-Fi lee señal y ruido de radio (SNR). En cualquier conexión "
         "mide pérdida de paquetes y jitter hacia Internet. En cable muestra errores del adaptador.\n\n"
         "El indicador del menú lateral muestra si hay conexión a Internet. Debajo aparecen "
-        "la IP privada (la de la red de casa, no la del túnel VPN) y la IP pública de la conexión.",
+        "la IP privada (la de la red de casa, no la del túnel VPN), la IP pública y si "
+        "el equipo está usando una VPN (ExpressVPN conectada o un túnel típico como tun/WireGuard).",
     ),
     (
         "Red Local",
-        "Buscar Equipos en Red Local recorre la red y lista cada dispositivo con IP, "
-        "nombre, MAC y si comparte Samba (puertos 139/445).\n\n"
+        "Quién hay en la red: recorre la red (Wi‑Fi o cable) y lista cada dispositivo "
+        "con IP, nombre, MAC y si comparte Samba (puertos 139/445). Es la forma fiable "
+        "de ver quién está conectado sin entrar en el router; el listado del router "
+        "solo está en la web del fabricante.\n\n"
         "Haz doble clic en un equipo para abrir smb:// en el administrador de archivos "
         "si el servicio está disponible.\n\n"
+        "¿Responde el router?: hace ping a la puerta de enlace de casa y muestra si "
+        "contesta y la latencia. Puede abrir la página de configuración del router "
+        "(http://su-IP) en el navegador.\n\n"
         "Compartir carpeta: elige una carpeta de tu usuario para que otro equipo de casa "
         "la vea, solo para leer o también para cambiar archivos. Cualquiera de la red puede "
         "abrirla sin contraseña. Hace falta pertenecer al grupo sambashare; si no, se ofrece "
@@ -173,7 +201,8 @@ SECCIONES = (
     (
         "Navegadores",
         "Abrir Chrome, Firefox o Edge en modo normal o privado/incógnito, e instalarlos "
-        "si no están en el sistema. También Brave, Chromium y Vivaldi.\n\n"
+        "si no están en el sistema. También Brave, Chromium y Vivaldi. "
+        "Las acciones están agrupadas en abrir, instalar, limpiar y perfiles.\n\n"
         "Limpiar caché e historial de cada navegador (si está instalado).\n"
         "Perfiles y marcadores: lista los perfiles locales y exporta el archivo de marcadores.",
     ),

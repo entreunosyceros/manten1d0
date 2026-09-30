@@ -139,6 +139,17 @@ def leer_registro():
         return f"No se pudo leer el registro: {error}"
 
 
+def vaciar_registro():
+    """Borra el archivo de acciones. No toca el historial de comandos repetibles."""
+    try:
+        os.makedirs(RUTA_DATOS_USUARIO, exist_ok=True)
+        with open(RUTA_REGISTRO, "w", encoding="utf-8") as archivo:
+            archivo.write("")
+        return True
+    except OSError:
+        return False
+
+
 def confirmar(mensaje, parent=None, titulo="¿Seguro?"):
     return messagebox.askyesno(titulo, mensaje, parent=parent)
 
@@ -149,13 +160,40 @@ def mostrar_registro(parent=None):
     ventana.geometry("720x420")
     texto = scrolledtext.ScrolledText(ventana, wrap=tk.WORD)
     texto.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-    texto.insert(tk.END, leer_registro())
-    texto.see(tk.END)
-    texto.config(state=tk.DISABLED)
+
+    def refrescar():
+        texto.config(state=tk.NORMAL)
+        texto.delete("1.0", tk.END)
+        texto.insert(tk.END, leer_registro())
+        texto.see(tk.END)
+        texto.config(state=tk.DISABLED)
+
+    def vaciar():
+        if not confirmar(
+            "Se va a borrar todo el registro de acciones.\n\n"
+            "No afecta al historial de comandos que se pueden repetir.\n\n"
+            "¿Quieres vaciarlo?",
+            ventana,
+            "Vaciar El Registro",
+        ):
+            return
+        if not vaciar_registro():
+            messagebox.showerror("Registro De Acciones", "No se pudo vaciar el registro.", parent=ventana)
+            return
+        refrescar()
+        messagebox.showinfo("Registro De Acciones", "El registro se ha vaciado.", parent=ventana)
+
+    refrescar()
+    marco = tk.Frame(ventana)
+    marco.pack(pady=(0, 8))
     con_tooltip(
-        tk.Button(ventana, text="Cerrar", command=ventana.destroy),
+        tk.Button(marco, text="Vaciar registro", command=vaciar),
+        "Borra todas las entradas del registro de acciones",
+    ).pack(side=tk.LEFT, padx=6)
+    con_tooltip(
+        tk.Button(marco, text="Cerrar", command=ventana.destroy),
         "Cierra el registro de acciones",
-    ).pack(pady=(0, 8))
+    ).pack(side=tk.LEFT, padx=6)
 
 
 def mostrar_historial_comandos(parent=None):

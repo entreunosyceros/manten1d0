@@ -1,6 +1,7 @@
-"""Descubrimiento de dispositivos en la red local, carpetas compartidas y encendido por red."""
+"""Descubrimiento de dispositivos en la red local, carpetas compartidas, router y encendido por red."""
 
 import json
+import webbrowser
 import os
 import re
 import socket
@@ -647,3 +648,165 @@ class EncenderPC:
             "Si no lo hace, activa Wake-on-LAN en su BIOS.",
             parent=self.root,
         )
+
+
+
+def _gateway_casa():
+    """IP del router (gateway de la ruta por defecto) o None."""
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    try:
+        proceso = subprocess.run(
+            ["ip", "-4", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=entorno,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if proceso.returncode != 0 or not proceso.stdout.strip():
+        return None
+    coincidencia = re.search(r"default via (\d+\.\d+\.\d+\.\d+)", proceso.stdout)
+    return coincidencia.group(1) if coincidencia else None
+
+
+def _ping_host(ip, veces=3):
+    """Devuelve (ok, latencia_ms_o_None, detalle)."""
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    try:
+        proceso = subprocess.run(
+            ["ping", "-c", str(veces), "-W", "2", ip],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=entorno,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        return False, None, str(error)
+    salida = (proceso.stdout or "") + (proceso.stderr or "")
+    latencia = None
+    media = re.search(r"rtt min/avg/max/[^\s]+\s*=\s*[\d.]+/([\d.]+)/", salida)
+    if not media:
+        media = re.search(r"min/avg/max/[^\s]+\s*=\s*[\d.]+/([\d.]+)/", salida)
+    if media:
+        try:
+            latencia = float(media.group(1))
+        except ValueError:
+            latencia = None
+    return proceso.returncode == 0, latencia, salida.strip()
+
+
+class RouterCasa:
+    """Comprueba si el router de casa responde al ping."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("¿Responde El Router?")
+        self.root.minsize(480, 280)
+        _centrar(self.root, 520, 320)
+        self._gateway = None
+
+        tk.Label(self.root, text="¿Responde el router?", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Comprueba si el aparato de tu red (el router) contesta. "
+                "Si no responde, casi nada de la red de casa funcionará bien."
+            ),
+            wraplength=480,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 8))
+
+        self.lbl_estado = tk.Label(
+            self.root,
+            text="Pulsa Comprobar para hacer un ping al router.",
+            font=("Arial", 11, "bold"),
+            wraplength=480,
+            justify=tk.LEFT,
+        )
+        self.lbl_estado.pack(fill=tk.X, padx=14, pady=4)
+
+        self.lbl_detalle = tk.Label(self.root, text="", wraplength=480, justify=tk.LEFT)
+        self.lbl_detalle.pack(fill=tk.X, padx=14, pady=(0, 8))
+
+        marco = tk.Frame(self.root)
+        marco.pack(pady=8)
+        self.btn_comprobar = tk.Button(marco, text="Comprobar", width=14, command=self.comprobar)
+        self.btn_comprobar.pack(side=tk.LEFT, padx=6)
+        con_tooltip(self.btn_comprobar, "Hace tres pings al router (la puerta de enlace de tu red)")
+        self.btn_abrir = tk.Button(
+            marco, text="Abrir página del router", width=20, command=self.abrir_pagina, state=tk.DISABLED
+        )
+        self.btn_abrir.pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            self.btn_abrir,
+            "Abre en el navegador la dirección del router (suele pedir usuario y contraseña del aparato)",
+        )
+        btn_cerrar = tk.Button(marco, text="Cerrar", width=10, command=self.root.destroy)
+        btn_cerrar.pack(side=tk.LEFT, padx=6)
+        con_tooltip(btn_cerrar, "Cierra esta ventana")
+
+        _tema(self.root)
+        self.comprobar()
+
+    def comprobar(self):
+        self.btn_comprobar.config(state=tk.DISABLED)
+        self.lbl_estado.config(text="Comprobando…", fg="#2471a3")
+        self.lbl_detalle.config(text="")
+
+        def trabajo():
+            gateway = _gateway_casa()
+            if not gateway:
+                return {"gateway": None, "ok": False, "latencia": None, "detalle": "Sin ruta por defecto"}
+            ok, latencia, detalle = _ping_host(gateway)
+            return {"gateway": gateway, "ok": ok, "latencia": latencia, "detalle": detalle}
+
+        def al_terminar(datos):
+            if not self.root.winfo_exists():
+                return
+            self.btn_comprobar.config(state=tk.NORMAL)
+            self._gateway = datos.get("gateway")
+            if not self._gateway:
+                self.lbl_estado.config(text="No se encontró el router.", fg="#c0392b")
+                self.lbl_detalle.config(
+                    text="Este equipo no tiene una ruta por defecto. Revisa el cable o el Wi‑Fi."
+                )
+                self.btn_abrir.config(state=tk.DISABLED)
+                return
+            if datos["ok"]:
+                lat = datos["latencia"]
+                extra = f" Latencia media: {lat:.1f} ms." if lat is not None else ""
+                self.lbl_estado.config(
+                    text=f"Sí: el router {self._gateway} responde.{extra}",
+                    fg="#1e8449",
+                )
+                self.lbl_detalle.config(
+                    text="Si quieres cambiar Wi‑Fi o contraseña del router, abre su página (botón de abajo)."
+                )
+                self.btn_abrir.config(state=tk.NORMAL)
+            else:
+                self.lbl_estado.config(
+                    text=f"No responde: {self._gateway}",
+                    fg="#c0392b",
+                )
+                self.lbl_detalle.config(
+                    text="Prueba otro cable, reinicia el router o revisa la Wi‑Fi. "
+                    "Aun así puedes intentar abrir su página por si el ping está bloqueado."
+                )
+                self.btn_abrir.config(state=tk.NORMAL)
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self.btn_comprobar.config(state=tk.NORMAL)
+            messagebox.showerror("¿Responde El Router?", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def abrir_pagina(self):
+        if not self._gateway:
+            messagebox.showinfo("¿Responde El Router?", "Primero comprueba el router.", parent=self.root)
+            return
+        webbrowser.open(f"http://{self._gateway}")

@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 from tkinter import messagebox
 from tooltip import ToolTip
@@ -26,13 +27,18 @@ from tooltip import ToolTip
 tema_seleccionado = "Claro"  # Tema predeterminado
 
 _COLORES_CLARO = {
-    "bg": "lightgrey",
-    "fg": "black",
-    "base": "white",
-    "text": "black",
+    "bg": "#f6f5f4",
+    "fg": "#5e5c64",
+    "base": "#f6f5f4",
+    "text": "#5e5c64",
     "select": "#3584e4",
-    "select_fg": "white",
+    "select_fg": "#ffffff",
+    "sidebar": "#f0efed",
+    "sidebar_activa": "#e4ebf5",
+    "borde": "#dcdad5",
+    "hover": "#d9e5f5",
 }
+_familia_ui = None
 _cache_oscuro = None
 _FONDOS_ESTADO = {
     "green", "red",
@@ -65,6 +71,128 @@ def color_texto():
 
 def color_campo():
     return colores_de(tema_seleccionado)["base"]
+
+
+def color_barra():
+    return colores_de(tema_seleccionado).get("sidebar", color_fondo())
+
+
+def color_barra_activa():
+    return colores_de(tema_seleccionado).get("sidebar_activa", color_campo())
+
+
+def color_borde():
+    return colores_de(tema_seleccionado).get("borde", color_barra())
+
+
+def color_hover():
+    return colores_de(tema_seleccionado).get("hover", color_barra_activa())
+
+
+def aplicar_hover(boton, fondo_normal=None, fondo_hover=None):
+    """Resalta el botón al pasar el ratón. No toca botones de aviso (rojo, verde, etc.)."""
+    try:
+        if str(boton.cget("bg")).lower() in _FONDOS_ESTADO:
+            return boton
+    except tk.TclError:
+        return boton
+
+    if fondo_normal is not None:
+        boton._hover_fondo = fondo_normal
+    elif not hasattr(boton, "_hover_fondo"):
+        boton._hover_fondo = None
+    if fondo_hover is not None:
+        boton._hover_sobre = fondo_hover
+    elif not hasattr(boton, "_hover_sobre"):
+        boton._hover_sobre = None
+
+    if getattr(boton, "_hover_aplicado", False):
+        return boton
+
+    boton._hover_aplicado = True
+    boton._hover_dentro = False
+    boton._hover_antes = None
+
+    def _fondo_reposo():
+        if getattr(boton, "_nav_activa", False):
+            return color_barra_activa()
+        if boton._hover_fondo is not None:
+            return boton._hover_fondo
+        if getattr(boton, "_zona", None) == "barra":
+            return color_barra()
+        return color_campo()
+
+    def _fondo_sobre():
+        if boton._hover_sobre is not None:
+            return boton._hover_sobre
+        return color_hover()
+
+    def al_entrar(_evento=None):
+        try:
+            if getattr(boton, "_hover_dentro", False):
+                return
+            actual = str(boton.cget("bg")).lower()
+            if actual in _FONDOS_ESTADO:
+                return
+            boton._hover_dentro = True
+            boton._hover_antes = actual
+            color = _fondo_sobre()
+            boton.configure(bg=color, activebackground=color)
+        except tk.TclError:
+            boton._hover_dentro = False
+
+    def al_salir(_evento=None):
+        try:
+            if not getattr(boton, "_hover_dentro", False):
+                return
+            boton._hover_dentro = False
+            actual = str(boton.cget("bg")).lower()
+            if actual in _FONDOS_ESTADO:
+                return
+            color = boton._hover_antes or _fondo_reposo()
+            boton._hover_antes = None
+            boton.configure(bg=color, activebackground=color)
+        except tk.TclError:
+            boton._hover_dentro = False
+
+    boton.bind("<Enter>", al_entrar, add="+")
+    boton.bind("<Leave>", al_salir, add="+")
+    boton._hover_entrar = al_entrar
+    boton._hover_salir = al_salir
+    return boton
+
+
+def fuente_ui(tamano=11, peso="normal"):
+    """Ubuntu si está instalada; si no, la tipografía que ya usaba la interfaz."""
+    global _familia_ui
+    if _familia_ui is None:
+        try:
+            familias = set(tkfont.families())
+        except tk.TclError:
+            familias = set()
+        _familia_ui = "Ubuntu" if "Ubuntu" in familias else "Arial"
+    if peso == "bold":
+        return (_familia_ui, tamano, "bold")
+    return (_familia_ui, tamano)
+
+
+def _mezclar(hex_a, hex_b, peso_a=0.7):
+    """Acerca dos colores para que no haya saltos bruscos."""
+    try:
+        a = hex_a.lstrip("#")
+        b = hex_b.lstrip("#")
+        if len(a) != 6 or len(b) != 6:
+            return hex_a
+        ra, ga, ba = int(a[0:2], 16), int(a[2:4], 16), int(a[4:6], 16)
+        rb, gb, bb = int(b[0:2], 16), int(b[2:4], 16), int(b[4:6], 16)
+        peso_b = 1.0 - peso_a
+        return "#{:02x}{:02x}{:02x}".format(
+            int(ra * peso_a + rb * peso_b),
+            int(ga * peso_a + gb * peso_b),
+            int(ba * peso_a + bb * peso_b),
+        )
+    except ValueError:
+        return hex_a
 
 
 def _gsettings(clave):
@@ -123,12 +251,16 @@ def _colores_oscuros_sistema():
     ruta = _ruta_tema(_tema_gtk_oscuro()) or _ruta_tema("Yaru-dark") or _ruta_tema("Adwaita-dark")
     if not ruta:
         return {
-            "bg": "#353535",
-            "fg": "#F7F7F7",
-            "base": "#3d3d3d",
-            "text": "#F7F7F7",
+            "bg": "#383838",
+            "fg": "#deddda",
+            "base": "#404040",
+            "text": "#deddda",
             "select": "#E95420",
             "select_fg": "#FFFFFF",
+            "sidebar": "#333333",
+            "sidebar_activa": "#454545",
+            "borde": "#4a4a4a",
+            "hover": "#555555",
         }
     try:
         with open(ruta, encoding="utf-8", errors="replace") as archivo:
@@ -141,15 +273,23 @@ def _colores_oscuros_sistema():
         texto,
     ):
         encontrados[clave] = valor
-    fondo = encontrados.get("bg_color", "#353535")
-    frente = encontrados.get("fg_color", "#F7F7F7")
+    fondo = encontrados.get("bg_color", "#383838")
+    frente = encontrados.get("fg_color", "#deddda")
+    campo = encontrados.get("base_color", fondo)
+    # Acerca barra y contenido al color de fondo para que no haya un corte duro.
+    frente_suave = _mezclar(frente, fondo, 0.82)
     return {
         "bg": fondo,
-        "fg": frente,
-        "base": encontrados.get("base_color", fondo),
-        "text": encontrados.get("text_color", frente),
+        "fg": frente_suave,
+        "base": _mezclar(campo, fondo, 0.55),
+        "text": frente_suave,
         "select": encontrados.get("selected_bg_color", "#E95420"),
         "select_fg": encontrados.get("selected_fg_color", "#FFFFFF"),
+        "sidebar": _mezclar(fondo, "#000000", 0.92),
+        "sidebar_activa": _mezclar(campo, fondo, 0.45),
+        "borde": _mezclar(campo, fondo, 0.35),
+        # Gris un poco más claro que el botón, para leer el texto claro.
+        "hover": _mezclar("#ffffff", fondo, 0.28),
     }
 
 
@@ -205,14 +345,47 @@ def cambiar_tema(ventana, tema):
             if isinstance(child, tk.Label):
                 actual = str(child.cget("bg")).lower()
                 if actual not in _FONDOS_ESTADO:
-                    child.config(background=fondo, foreground=frente)
+                    if getattr(child, "_zona", None) == "barra":
+                        child.config(
+                            background=colores.get("sidebar", fondo),
+                            foreground=frente,
+                        )
+                    else:
+                        child.config(background=fondo, foreground=frente)
+            elif isinstance(child, tk.Button) and getattr(child, "_zona", None) == "barra":
+                activa = getattr(child, "_nav_activa", False)
+                fondo_btn = colores.get("sidebar_activa" if activa else "sidebar", fondo)
+                child.config(
+                    background=fondo_btn,
+                    foreground=frente,
+                    activebackground=fondo_btn,
+                    activeforeground=frente,
+                    relief="flat",
+                    borderwidth=0,
+                    highlightthickness=0,
+                    font=fuente_ui(11, "bold" if activa else "normal"),
+                )
+                if getattr(child, "_hover_aplicado", False):
+                    child._hover_fondo = colores.get("sidebar", fondo)
+                    child._hover_sobre = None
+                    child._hover_dentro = False
+                    child._hover_antes = None
             elif isinstance(child, (tk.Button, tk.Menubutton)):
+                actual = str(child.cget("bg")).lower()
+                if actual in _FONDOS_ESTADO:
+                    pintar(child)
+                    continue
                 child.config(
                     background=fondo,
                     foreground=frente,
                     activebackground=fondo,
                     activeforeground=frente,
                 )
+                if getattr(child, "_hover_aplicado", False):
+                    child._hover_fondo = campo
+                    child._hover_sobre = None
+                    child._hover_dentro = False
+                    child._hover_antes = None
             elif isinstance(child, (tk.Checkbutton, tk.Radiobutton)):
                 child.config(
                     background=fondo,
@@ -244,7 +417,10 @@ def cambiar_tema(ventana, tema):
                     if child.type(item) == "line":
                         child.itemconfig(item, fill=frente)
             elif isinstance(child, (tk.Frame, tk.Toplevel, tk.Tk)):
-                child.config(background=fondo)
+                if getattr(child, "_zona", None) == "barra":
+                    child.config(background=colores.get("sidebar", fondo))
+                else:
+                    child.config(background=fondo)
             pintar(child)
 
     pintar(ventana)

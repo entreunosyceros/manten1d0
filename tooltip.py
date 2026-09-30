@@ -94,4 +94,8 @@ class ToolTip:
 def con_tooltip(widget, texto):
     """Asocia un tooltip descriptivo al widget y lo devuelve para poder encadenar pack/grid."""
     ToolTip(widget, texto)
+    if isinstance(widget, tk.Button):
+        import preferencias
+
+        preferencias.aplicar_hover(widget)
     return widget

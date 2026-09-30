@@ -1,6 +1,7 @@
-"""Wi-Fi (nmcli), DNS y edición cuidadosa de /etc/hosts."""
+"""Wi-Fi (nmcli), DNS, hosts y comprobación de puerto hacia Internet."""
 
 import os
+import webbrowser
 import re
 import subprocess
 import tkinter as tk
@@ -474,3 +475,203 @@ class SelectorDns:
             self.cargar()
 
         en_hilo(self.root, trabajo, al_terminar=terminar)
+
+
+
+def _puerto_escucha_local(puerto):
+    """True si algo escucha ese puerto TCP o UDP en este equipo."""
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    encontrados = []
+    for proto in ("t", "u"):
+        try:
+            proceso = subprocess.run(
+                ["ss", f"-ln{proto}"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                env=entorno,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        if proceso.returncode != 0:
+            continue
+        marca = f":{puerto} "
+        marca2 = f":{puerto}\n"
+        for linea in proceso.stdout.splitlines():
+            if marca in linea or linea.rstrip().endswith(f":{puerto}"):
+                encontrados.append("TCP" if proto == "t" else "UDP")
+                break
+    return encontrados
+
+
+class PuertoDesdeInternet:
+    """Ayuda a comprobar si un puerto de este equipo es alcanzable desde Internet."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Puerto Desde Internet")
+        self.root.minsize(560, 420)
+        _centrar(self.root, 600, 460)
+        self.ip_publica = tk.StringVar(value="…")
+        self.puerto = tk.StringVar(value="80")
+
+        if not confirmar(
+            "Vas a comprobar un puerto de ESTE equipo hacia Internet.\n\n"
+            "Riesgos:\n"
+            "• Abrir puertos en el router puede exponer servicios de tu PC.\n"
+            "• No uses esto para mirar puertos de otras personas.\n"
+            "• Si tu operadora usa CGNAT, un puerto puede parecer cerrado "
+            "aunque en casa esté bien.\n\n"
+            "¿Quieres continuar?",
+            self.root,
+            "Aviso De Riesgos",
+        ):
+            self.root.after(50, self.root.destroy)
+            return
+
+        tk.Label(self.root, text="Puerto desde Internet", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Primero se mira si este PC escucha el puerto. "
+                "La prueba desde fuera se hace en una página web (no se escanean otras redes)."
+            ),
+            wraplength=560,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 8))
+
+        fila_ip = tk.Frame(self.root)
+        fila_ip.pack(fill=tk.X, padx=14, pady=4)
+        tk.Label(fila_ip, text="Tu IP pública:").pack(side=tk.LEFT)
+        tk.Label(fila_ip, textvariable=self.ip_publica, font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=8)
+
+        fila_p = tk.Frame(self.root)
+        fila_p.pack(fill=tk.X, padx=14, pady=4)
+        tk.Label(fila_p, text="Puerto (1–65535):").pack(side=tk.LEFT)
+        tk.Entry(fila_p, textvariable=self.puerto, width=8).pack(side=tk.LEFT, padx=8)
+
+        self.lbl_local = tk.Label(
+            self.root,
+            text="Pulsa «Comprobar en este PC» para ver si algo escucha ese puerto.",
+            wraplength=560,
+            justify=tk.LEFT,
+        )
+        self.lbl_local.pack(fill=tk.X, padx=14, pady=8)
+
+        self.lbl_aviso = tk.Label(
+            self.root,
+            text=(
+                "Para que entre desde Internet hace falta: el servicio escuchando aquí, "
+                "el cortafuegos permitiendo el puerto y, casi siempre, una regla en el router "
+                "(redirección de puertos)."
+            ),
+            wraplength=560,
+            justify=tk.LEFT,
+        )
+        self.lbl_aviso.pack(fill=tk.X, padx=14, pady=(0, 8))
+
+        marco = tk.Frame(self.root)
+        marco.pack(pady=10)
+        btn_local = tk.Button(marco, text="Comprobar en este PC", command=self.comprobar_local)
+        btn_local.pack(side=tk.LEFT, padx=6)
+        con_tooltip(btn_local, "Mira con ss si este equipo tiene el puerto abierto en escucha")
+        btn_web = tk.Button(marco, text="Comprobar desde Internet", command=self.comprobar_web)
+        btn_web.pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            btn_web,
+            "Abre una página web de comprobación de puertos con tu IP pública. Tú lanzas la prueba allí",
+        )
+        btn_cerrar = tk.Button(marco, text="Cerrar", command=self.root.destroy)
+        btn_cerrar.pack(side=tk.LEFT, padx=6)
+        con_tooltip(btn_cerrar, "Cierra esta ventana")
+
+        _tema(self.root)
+        self._cargar_ip()
+
+    def _cargar_ip(self):
+        def trabajo():
+            from cat_informacion import Informacion
+            return Informacion.obtener_direccion_ip_publica()
+
+        def al_terminar(ip):
+            if not self.root.winfo_exists():
+                return
+            self.ip_publica.set(ip or "No disponible")
+
+        def al_error(_error):
+            if self.root.winfo_exists():
+                self.ip_publica.set("No disponible")
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _leer_puerto(self):
+        try:
+            puerto = int(self.puerto.get().strip())
+        except ValueError:
+            messagebox.showinfo("Puerto Desde Internet", "Indica un número de puerto.", parent=self.root)
+            return None
+        if puerto < 1 or puerto > 65535:
+            messagebox.showinfo("Puerto Desde Internet", "El puerto debe estar entre 1 y 65535.", parent=self.root)
+            return None
+        return puerto
+
+    def comprobar_local(self):
+        puerto = self._leer_puerto()
+        if puerto is None:
+            return
+        self.lbl_local.config(text="Comprobando escucha local…")
+
+        def trabajo():
+            return _puerto_escucha_local(puerto)
+
+        def al_terminar(protos):
+            if not self.root.winfo_exists():
+                return
+            if protos:
+                self.lbl_local.config(
+                    text=f"En este PC sí hay algo escuchando el puerto {puerto} ({', '.join(protos)})."
+                )
+            else:
+                self.lbl_local.config(
+                    text=(
+                        f"En este PC no se ve nada escuchando el puerto {puerto}. "
+                        "Si quieres que entre desde fuera, primero tiene que haber un programa "
+                        "escuchando aquí."
+                    )
+                )
+
+        def al_error(error):
+            if self.root.winfo_exists():
+                messagebox.showerror("Puerto Desde Internet", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def comprobar_web(self):
+        puerto = self._leer_puerto()
+        if puerto is None:
+            return
+        ip = self.ip_publica.get().strip()
+        if not ip or ip in ("…", "No disponible"):
+            messagebox.showinfo(
+                "Puerto Desde Internet",
+                "Todavía no se conoce la IP pública. Espera un momento o revisa la conexión.",
+                parent=self.root,
+            )
+            return
+        if not confirmar(
+            f"Se va a abrir el navegador para comprobar el puerto {puerto} "
+            f"de tu IP pública {ip}.\n\n"
+            "La prueba la hace esa página web, no Manten1d0.\n\n¿Abrir el navegador?",
+            self.root,
+            "Comprobar Desde Internet",
+        ):
+            return
+        # Página estable de comprobación; el usuario introduce o confirma el puerto allí.
+        webbrowser.open(f"https://www.yougetsignal.com/tools/open-ports/")
+        self.lbl_local.config(
+            text=(
+                f"Navegador abierto. Tu IP pública es {ip}; comprueba el puerto {puerto} en la página. "
+                "Si sale cerrado, revisa el cortafuegos y la redirección en el router."
+            )
+        )

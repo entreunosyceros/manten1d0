@@ -1,6 +1,7 @@
 """
 Herramientas extra de la categoría Sistema:
-limpieza de espacio en disco, salud SMART, uso por carpetas, cortafuegos y servicios systemd.
+limpieza de espacio en disco, salud SMART, uso por carpetas, cortafuegos,
+servicios systemd (incluidos los que fallan), Snap/Flatpak y Bluetooth.
 """
 
 import json
@@ -1957,50 +1958,190 @@ def _ufw_activado():
     return None
 
 
+def _cidr_lan():
+    """Detecta la red local de la interfaz con ruta por defecto (p. ej. 192.168.1.0/24)."""
+    ruta = _comando(["ip", "-4", "route", "show", "default"], timeout=10)
+    if ruta.returncode != 0 or not ruta.stdout.strip():
+        return None
+    coincidencia = re.search(r"\bdev\s+(\S+)", ruta.stdout)
+    if not coincidencia:
+        return None
+    interfaz = coincidencia.group(1)
+    addrs = _comando(["ip", "-4", "-o", "addr", "show", "dev", interfaz], timeout=10)
+    if addrs.returncode != 0:
+        return None
+    match_ip = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+)/(\d+)", addrs.stdout)
+    if not match_ip:
+        return None
+    ip_txt, prefijo_txt = match_ip.group(1), match_ip.group(2)
+    try:
+        prefijo = int(prefijo_txt)
+    except ValueError:
+        return None
+    if prefijo < 0 or prefijo > 32:
+        return None
+    partes = [int(p) for p in ip_txt.split(".")]
+    ip_int = (partes[0] << 24) | (partes[1] << 16) | (partes[2] << 8) | partes[3]
+    mascara = (0xFFFFFFFF << (32 - prefijo)) & 0xFFFFFFFF if prefijo else 0
+    red = ip_int & mascara
+    return (
+        f"{(red >> 24) & 255}.{(red >> 16) & 255}.{(red >> 8) & 255}.{red & 255}/{prefijo}"
+    )
+
+
+def _ufw_status_texto():
+    """Devuelve la salida de `ufw status` o None si falla."""
+    resultado = sudo_run(["ufw", "status"], "Consultar estado del cortafuegos", timeout=40)
+    if resultado is None or resultado.returncode != 0:
+        return None
+    return resultado.stdout or ""
+
+
+def _reglas_desde_status(texto, cidr=None):
+    """Interpreta si SSH, Samba y la regla de LAN aparecen en ufw status."""
+    bajo = (texto or "").lower()
+    ssh = (
+        "openssh" in bajo
+        or "22/tcp" in bajo
+        or re.search(r"(^|\s)22(\s|/)", bajo) is not None
+    )
+    samba = (
+        "samba" in bajo
+        or "137" in bajo
+        or "138" in bajo
+        or "139" in bajo
+        or "445" in bajo
+    )
+    lan = False
+    if cidr:
+        lan = cidr.lower() in bajo and "allow" in bajo
+    return {"ssh": ssh, "samba": samba, "lan": lan}
+
+
 class Cortafuegos:
-    """Activa o desactiva ufw con una explicación en lenguaje llano."""
+    """Activa o desactiva ufw y gestiona reglas frecuentes (SSH, Samba, red local)."""
 
     def __init__(self, root):
         self.root = root
         self.root.title("Cortafuegos")
-        self.root.minsize(520, 320)
-        _centrar_ventana(self.root, 560, 360)
+        self.root.minsize(560, 480)
+        _centrar_ventana(self.root, 640, 520)
         self._ocupado = False
+        self._cidr = _cidr_lan()
+        self._reglas = {"ssh": False, "samba": False, "lan": False}
 
-        tk.Label(self.root, text="Cortafuegos", font=("Arial", 14, "bold")).pack(pady=(14, 6))
+        tk.Label(self.root, text="Cortafuegos", font=("Arial", 14, "bold")).pack(pady=(12, 4))
         self.lbl_estado = tk.Label(self.root, text="Comprobando…", font=("Arial", 12, "bold"))
-        self.lbl_estado.pack(pady=(0, 8))
+        self.lbl_estado.pack(pady=(0, 6))
         tk.Label(
             self.root,
             text=(
                 "Activado: solo entran las conexiones que tú permites. "
-                "El equipo sigue pudiendo salir a Internet.\n\n"
-                "Desactivado: otros equipos de la red pueden intentar conectar con este."
+                "El equipo sigue pudiendo salir a Internet.\n"
+                "Desactivado: otros equipos de la red pueden intentar conectar con este.\n\n"
+                "Las reglas de abajo solo sirven si el cortafuegos está activado."
             ),
-            wraplength=500,
+            wraplength=600,
             justify=tk.LEFT,
-        ).pack(padx=16, pady=(0, 12))
+        ).pack(padx=16, pady=(0, 8))
 
         marco = tk.Frame(self.root)
-        marco.pack(pady=8)
+        marco.pack(pady=(0, 8))
         self.btn_cambiar = tk.Button(marco, text="Activar", width=16, command=self._activar)
         self.btn_cambiar.pack(side=tk.LEFT, padx=6)
         self.tip_cambiar = ToolTip(
             self.btn_cambiar,
             "Enciende o apaga el cortafuegos del equipo. Pide confirmación y la contraseña de administrador",
         )
+        self.btn_refrescar = tk.Button(marco, text="Actualizar estado", width=16, command=self._refrescar)
+        self.btn_refrescar.pack(side=tk.LEFT, padx=6)
+        ToolTip(self.btn_refrescar, "Vuelve a leer si el cortafuegos está activo y qué reglas hay")
         boton_cerrar = tk.Button(marco, text="Cerrar", width=12, command=self.root.destroy)
         boton_cerrar.pack(side=tk.LEFT, padx=6)
         ToolTip(boton_cerrar, "Cierra esta ventana")
 
+        self.marco_reglas = tk.LabelFrame(self.root, text="Reglas frecuentes", padx=10, pady=8)
+        self.marco_reglas.pack(fill=tk.X, padx=16, pady=(4, 10))
+
+        self.lbl_aviso_reglas = tk.Label(
+            self.marco_reglas,
+            text="",
+            anchor="w",
+            justify=tk.LEFT,
+            wraplength=580,
+        )
+        self.lbl_aviso_reglas.pack(fill=tk.X, pady=(0, 6))
+
+        self._filas = {}
+        self._filas["ssh"] = self._crear_fila_regla(
+            self.marco_reglas,
+            "Permitir SSH",
+            "Deja entrar por SSH (acceso remoto seguro, puerto 22).",
+            self._toggle_ssh,
+        )
+        self._filas["samba"] = self._crear_fila_regla(
+            self.marco_reglas,
+            "Permitir Samba",
+            "Deja ver carpetas compartidas desde otros equipos de la red.",
+            self._toggle_samba,
+        )
+        texto_lan = (
+            f"Solo esta red ({self._cidr})"
+            if self._cidr
+            else "Solo esta red (no detectada)"
+        )
+        self._filas["lan"] = self._crear_fila_regla(
+            self.marco_reglas,
+            texto_lan,
+            "Permite conexiones desde tu red de casa, no desde Internet.",
+            self._toggle_lan,
+        )
+
         _aplicar_tema(self.root)
         self._mostrar_estado()
+        if _ufw_instalado():
+            self._refrescar()
+
+    def _crear_fila_regla(self, padre, titulo, tooltip, comando):
+        fila = tk.Frame(padre)
+        fila.pack(fill=tk.X, pady=4)
+        lbl_titulo = tk.Label(fila, text=titulo, width=28, anchor="w")
+        lbl_titulo.pack(side=tk.LEFT)
+        ToolTip(lbl_titulo, tooltip)
+        lbl_estado = tk.Label(fila, text="…", width=12, anchor="w")
+        lbl_estado.pack(side=tk.LEFT, padx=6)
+        boton = tk.Button(fila, text="Permitir", width=10, command=comando)
+        boton.pack(side=tk.RIGHT)
+        ToolTip(boton, tooltip)
+        return {"titulo": lbl_titulo, "estado": lbl_estado, "boton": boton}
+
+    def _set_ocupado(self, ocupado, mensaje=None):
+        self._ocupado = ocupado
+        estado = tk.DISABLED if ocupado else tk.NORMAL
+        try:
+            self.btn_cambiar.config(state=estado)
+            self.btn_refrescar.config(state=estado)
+        except tk.TclError:
+            pass
+        for fila in self._filas.values():
+            try:
+                fila["boton"].config(state=estado)
+            except tk.TclError:
+                pass
+        if mensaje:
+            self.lbl_estado.config(text=mensaje, fg="#2471a3")
 
     def _mostrar_estado(self):
         if not _ufw_instalado():
             self.lbl_estado.config(text="No está instalado.", fg="#c0392b")
             self.btn_cambiar.config(text="Instalar", command=self._instalar, state=tk.NORMAL)
             self.tip_cambiar.text = "Instala el cortafuegos ufw"
+            self.lbl_aviso_reglas.config(
+                text="Instala el cortafuegos para poder usar las reglas frecuentes."
+            )
+            for fila in self._filas.values():
+                fila["boton"].config(state=tk.DISABLED)
+                fila["estado"].config(text="—")
             return
         activo = _ufw_activado()
         if activo is None:
@@ -2014,6 +2155,9 @@ class Cortafuegos:
             )
             self.btn_cambiar.config(text="Desactivar", command=self._desactivar, state=tk.NORMAL)
             self.tip_cambiar.text = "Apaga el cortafuegos. Las conexiones de otros equipos dejarán de filtrarse"
+            self.lbl_aviso_reglas.config(
+                text="Puedes permitir o quitar reglas frecuentes sin editar ufw a mano."
+            )
         else:
             self.lbl_estado.config(
                 text="Desactivado. Las conexiones de fuera pueden entrar.",
@@ -2021,6 +2165,70 @@ class Cortafuegos:
             )
             self.btn_cambiar.config(text="Activar", command=self._activar, state=tk.NORMAL)
             self.tip_cambiar.text = "Enciende el cortafuegos. Solo entrarán las conexiones permitidas"
+            self.lbl_aviso_reglas.config(
+                text="El cortafuegos está apagado: las reglas no filtran hasta que lo actives."
+            )
+        self._pintar_reglas()
+
+    def _pintar_reglas(self):
+        for clave, etiqueta_si in (
+            ("ssh", "Permitido"),
+            ("samba", "Permitido"),
+            ("lan", "Permitido"),
+        ):
+            fila = self._filas[clave]
+            activo_regla = self._reglas.get(clave, False)
+            fila["estado"].config(text=etiqueta_si if activo_regla else "No")
+            fila["boton"].config(text="Quitar" if activo_regla else "Permitir")
+        if not self._cidr:
+            self._filas["lan"]["boton"].config(state=tk.DISABLED)
+            self._filas["lan"]["estado"].config(text="N/D")
+            self._filas["lan"]["titulo"].config(text="Solo esta red (no detectada)")
+        else:
+            self._filas["lan"]["titulo"].config(text=f"Solo esta red ({self._cidr})")
+            if not self._ocupado and _ufw_instalado():
+                self._filas["lan"]["boton"].config(state=tk.NORMAL)
+
+    def _refrescar(self):
+        if self._ocupado:
+            return
+        if not _ufw_instalado():
+            self._mostrar_estado()
+            return
+        self._set_ocupado(True, "Leyendo reglas…")
+
+        def trabajo():
+            self._cidr = _cidr_lan()
+            texto = _ufw_status_texto()
+            return texto
+
+        def al_terminar(texto):
+            if not self.root.winfo_exists():
+                return
+            self._ocupado = False
+            if texto is None:
+                self._reglas = {"ssh": False, "samba": False, "lan": False}
+                self.lbl_aviso_reglas.config(
+                    text="No se pudieron leer las reglas (hace falta contraseña de administrador)."
+                )
+            else:
+                self._reglas = _reglas_desde_status(texto, self._cidr)
+            self._mostrar_estado()
+            self.btn_refrescar.config(state=tk.NORMAL)
+            if _ufw_instalado():
+                for fila in self._filas.values():
+                    fila["boton"].config(state=tk.NORMAL)
+                self._pintar_reglas()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._ocupado = False
+            self.btn_refrescar.config(state=tk.NORMAL)
+            messagebox.showerror("Cortafuegos", str(error), parent=self.root)
+            self._mostrar_estado()
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
 
     def _activar(self):
         if not confirmar(
@@ -2054,24 +2262,1238 @@ class Cortafuegos:
             return
         self._aplicar(["apt-get", "install", "-y", "ufw"], "Instalar el cortafuegos")
 
-    def _aplicar(self, args, descripcion):
+    def _toggle_ssh(self):
         if self._ocupado:
             return
-        self._ocupado = True
-        self.btn_cambiar.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Espera un momento…", fg="#2471a3")
+        if self._reglas.get("ssh"):
+            if not confirmar(
+                "Se va a quitar el permiso de SSH.\n\n"
+                "Ya no se podrá entrar a este equipo por SSH desde fuera "
+                "(salvo otras reglas que tengas).\n\n¿Quieres quitarlo?",
+                self.root,
+                "Quitar SSH",
+            ):
+                return
+
+            def trabajo():
+                r = sudo_run(["ufw", "delete", "allow", "OpenSSH"], "Quitar permiso SSH", timeout=40)
+                if r is not None and r.returncode != 0:
+                    r = sudo_run(["ufw", "delete", "allow", "22/tcp"], "Quitar permiso SSH 22/tcp", timeout=40)
+                return r
+
+            self._aplicar_fn(trabajo, "Quitando permiso SSH…")
+            return
+        if not confirmar(
+            "Se va a permitir SSH (acceso remoto seguro, puerto 22).\n\n"
+            "Otros equipos podrán intentar conectar por SSH a este.\n\n¿Quieres permitirlo?",
+            self.root,
+            "Permitir SSH",
+        ):
+            return
 
         def trabajo():
-            return sudo_run(args, descripcion, timeout=180)
+            r = sudo_run(["ufw", "allow", "OpenSSH"], "Permitir SSH", timeout=40)
+            if r is not None and r.returncode != 0:
+                r = sudo_run(["ufw", "allow", "22/tcp"], "Permitir SSH 22/tcp", timeout=40)
+            return r
+
+        self._aplicar_fn(trabajo, "Permitiendo SSH…")
+
+    def _toggle_samba(self):
+        if self._ocupado:
+            return
+        if self._reglas.get("samba"):
+            if not confirmar(
+                "Se va a quitar el permiso de Samba.\n\n"
+                "Otros equipos dejarán de ver las carpetas compartidas "
+                "si el cortafuegos está activado.\n\n¿Quieres quitarlo?",
+                self.root,
+                "Quitar Samba",
+            ):
+                return
+            self._aplicar(["ufw", "delete", "allow", "samba"], "Quitar permiso Samba")
+            return
+        if not confirmar(
+            "Se va a permitir Samba (carpetas compartidas en la red).\n\n"
+            "Otros equipos de la red podrán ver las carpetas que compartas.\n\n¿Quieres permitirlo?",
+            self.root,
+            "Permitir Samba",
+        ):
+            return
+        self._aplicar(["ufw", "allow", "samba"], "Permitir Samba")
+
+    def _toggle_lan(self):
+        if self._ocupado:
+            return
+        cidr = self._cidr or _cidr_lan()
+        if not cidr:
+            messagebox.showinfo(
+                "Cortafuegos",
+                "No se pudo detectar la red local de este equipo.",
+                parent=self.root,
+            )
+            return
+        self._cidr = cidr
+        if self._reglas.get("lan"):
+            if not confirmar(
+                f"Se va a quitar el permiso para la red local {cidr}.\n\n"
+                "Los equipos de casa dejarán de poder conectar por esa regla.\n\n¿Quieres quitarlo?",
+                self.root,
+                "Quitar Solo Esta Red",
+            ):
+                return
+            self._aplicar(["ufw", "delete", "allow", "from", cidr], f"Quitar acceso desde {cidr}")
+            return
+        if not confirmar(
+            f"Se va a permitir conexiones desde tu red local ({cidr}).\n\n"
+            "Los equipos de casa podrán conectar; no se abre el acceso a todo Internet.\n\n"
+            "¿Quieres permitirlo?",
+            self.root,
+            "Permitir Solo Esta Red",
+        ):
+            return
+        self._aplicar(["ufw", "allow", "from", cidr], f"Permitir acceso desde {cidr}")
+
+    def _aplicar(self, args, descripcion):
+        self._aplicar_fn(lambda: sudo_run(args, descripcion, timeout=180), "Espera un momento…")
+
+    def _aplicar_fn(self, trabajo, mensaje):
+        if self._ocupado:
+            return
+        self._set_ocupado(True, mensaje)
 
         def al_terminar(resultado):
-            self._ocupado = False
             if not self.root.winfo_exists():
                 return
-            if resultado is not None and resultado.returncode != 0:
+            self._ocupado = False
+            if resultado is not None and getattr(resultado, "returncode", 0) != 0:
                 texto = (resultado.stderr or resultado.stdout or "No se pudo completar la acción.").strip()
                 messagebox.showerror("Cortafuegos", texto, parent=self.root)
-            self._mostrar_estado()
+            self._refrescar()
 
-        en_hilo(self.root, trabajo, al_terminar=al_terminar)
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._ocupado = False
+            messagebox.showerror("Cortafuegos", str(error), parent=self.root)
+            self._refrescar()
 
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+
+def _binario_disponible(nombre):
+    return shutil.which(nombre) is not None
+
+
+def _parsear_tamano_humano(texto):
+    """Convierte tamaños tipo '129,5 MB', '129.5 MB' o '1.2 GiB' a bytes."""
+    if texto is None:
+        return 0
+    limpio = (
+        str(texto)
+        .strip()
+        .replace("\xa0", " ")
+        .replace("\u202f", " ")
+        .replace(",", ".")
+    )
+    if not limpio or limpio in ("-", "n/a", "N/A"):
+        return 0
+    try:
+        return int(float(limpio))
+    except ValueError:
+        pass
+    coincidencia = re.match(
+        r"^\s*([0-9]+(?:\.[0-9]+)?)[^\dA-Za-z]*([A-Za-z]+)\s*$",
+        limpio,
+    )
+    if not coincidencia:
+        return 0
+    cantidad = float(coincidencia.group(1))
+    unidad = coincidencia.group(2).upper().rstrip("S")
+    factores = {
+        "B": 1,
+        "BYTE": 1,
+        "K": 1024,
+        "KB": 1024,
+        "KIB": 1024,
+        "M": 1024 ** 2,
+        "MB": 1024 ** 2,
+        "MIB": 1024 ** 2,
+        "G": 1024 ** 3,
+        "GB": 1024 ** 3,
+        "GIB": 1024 ** 3,
+        "T": 1024 ** 4,
+        "TB": 1024 ** 4,
+        "TIB": 1024 ** 4,
+    }
+    return int(cantidad * factores.get(unidad, 0))
+
+
+def _tamano_snap(nombre, revision):
+    archivo = f"/var/lib/snapd/snaps/{nombre}_{revision}.snap"
+    return _tamano_ruta(archivo)
+
+
+def _listar_snaps():
+    """Lista snaps instalados con tamaño de la revisión activa."""
+    if not _binario_disponible("snap"):
+        return [], "no_instalado"
+    proceso = _comando(["snap", "list"], timeout=60)
+    if proceso.returncode != 0:
+        return [], (proceso.stderr or proceso.stdout or "No se pudo listar Snap.").strip()
+    apps = []
+    for linea in proceso.stdout.splitlines()[1:]:
+        partes = linea.split()
+        if len(partes) < 3:
+            continue
+        nombre, version, revision = partes[0], partes[1], partes[2]
+        apps.append({
+            "tipo": "Snap",
+            "id": nombre,
+            "nombre": nombre,
+            "version": version,
+            "revision": revision,
+            "instalacion": "system",
+            "tamano": _tamano_snap(nombre, revision),
+        })
+    return apps, None
+
+
+def _listar_flatpaks():
+    """Lista aplicaciones Flatpak (user y system) con tamaño."""
+    if not _binario_disponible("flatpak"):
+        return [], "no_instalado"
+    proceso = _comando(
+        [
+            "flatpak",
+            "list",
+            "--app",
+            "--columns=application,name,version,installation,size",
+        ],
+        timeout=90,
+    )
+    if proceso.returncode != 0:
+        return [], (proceso.stderr or proceso.stdout or "No se pudo listar Flatpak.").strip()
+    apps = []
+    for linea in proceso.stdout.splitlines():
+        partes = linea.split("\t")
+        if len(partes) < 5:
+            continue
+        app_id, nombre, version, instalacion, tamano_txt = (p.strip() for p in partes[:5])
+        if not app_id:
+            continue
+        apps.append({
+            "tipo": "Flatpak",
+            "id": app_id,
+            "nombre": nombre or app_id,
+            "version": version or "—",
+            "revision": "",
+            "instalacion": (instalacion or "system").lower(),
+            "tamano": _parsear_tamano_humano(tamano_txt),
+        })
+    return apps, None
+
+
+class SnapFlatpak:
+    """Lista, actualiza y desinstala aplicaciones Snap y Flatpak con el espacio que ocupan."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Snap Y Flatpak")
+        self.root.minsize(720, 480)
+        _centrar_ventana(self.root, 820, 560)
+        self._ocupado = False
+        self._apps = []
+        self._por_iid = {}
+        self.filtro = tk.StringVar(value="todos")
+
+        tk.Label(self.root, text="Snap y Flatpak", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Estas aplicaciones van aparte de APT: no salen en la lista de paquetes .deb "
+                "y suelen ocupar bastante espacio en el disco."
+            ),
+            wraplength=760,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 8))
+
+        self.lbl_resumen = tk.Label(
+            self.root,
+            text="Cargando lista…",
+            font=("Arial", 11, "bold"),
+            anchor="w",
+            justify=tk.LEFT,
+        )
+        self.lbl_resumen.pack(fill=tk.X, padx=14, pady=(0, 4))
+
+        self.lbl_aviso = tk.Label(self.root, text="", anchor="w", justify=tk.LEFT, wraplength=760)
+        self.lbl_aviso.pack(fill=tk.X, padx=14)
+
+        marco_filtro = tk.Frame(self.root)
+        marco_filtro.pack(fill=tk.X, padx=14, pady=(4, 2))
+        tk.Label(marco_filtro, text="Mostrar:").pack(side=tk.LEFT, padx=(0, 8))
+        for valor, texto in (("todos", "Todos"), ("snap", "Snap"), ("flatpak", "Flatpak")):
+            tk.Radiobutton(
+                marco_filtro,
+                text=texto,
+                variable=self.filtro,
+                value=valor,
+                command=self._aplicar_filtro,
+            ).pack(side=tk.LEFT, padx=4)
+
+        self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
+        self.progreso.pack(fill=tk.X, padx=14, pady=(2, 4))
+
+        marco_tabla = tk.Frame(self.root)
+        marco_tabla.pack(fill=tk.BOTH, expand=True, padx=14, pady=4)
+        self.tree = ttk.Treeview(
+            marco_tabla,
+            columns=("tipo", "nombre", "version", "tamano"),
+            show="headings",
+            selectmode="browse",
+        )
+        self.tree.heading("tipo", text="Tipo")
+        self.tree.heading("nombre", text="Nombre")
+        self.tree.heading("version", text="Versión")
+        self.tree.heading("tamano", text="Tamaño")
+        self.tree.column("tipo", width=80, anchor="w")
+        self.tree.column("nombre", width=360, anchor="w")
+        self.tree.column("version", width=160, anchor="w")
+        self.tree.column("tamano", width=100, anchor="e")
+        scroll = ttk.Scrollbar(marco_tabla, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        marco_botones = tk.Frame(self.root)
+        marco_botones.pack(fill=tk.X, padx=14, pady=10)
+
+        self.btn_refrescar = tk.Button(marco_botones, text="Actualizar lista", command=self.cargar)
+        self.btn_refrescar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_refrescar, "Vuelve a leer las aplicaciones Snap y Flatpak instaladas")
+
+        self.btn_act_sel = tk.Button(
+            marco_botones, text="Actualizar seleccionada", command=self._actualizar_seleccionada
+        )
+        self.btn_act_sel.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_act_sel, "Busca una versión nueva de la aplicación seleccionada")
+
+        self.btn_act_todas = tk.Button(
+            marco_botones, text="Actualizar todas", command=self._actualizar_todas
+        )
+        self.btn_act_todas.pack(side=tk.LEFT, padx=4)
+        ToolTip(
+            self.btn_act_todas,
+            "Actualiza todas las aplicaciones visibles según el filtro (Snap, Flatpak o ambas)",
+        )
+
+        self.btn_desinstalar = tk.Button(marco_botones, text="Desinstalar", command=self._desinstalar)
+        self.btn_desinstalar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_desinstalar, "Quita la aplicación seleccionada del equipo")
+
+        self.btn_instalar_fp = tk.Button(
+            marco_botones, text="Instalar Flatpak", command=self._instalar_flatpak
+        )
+        ToolTip(self.btn_instalar_fp, "Instala Flatpak con APT para poder usar aplicaciones Flatpak")
+
+        btn_cerrar = tk.Button(marco_botones, text="Cerrar", command=self.root.destroy)
+        btn_cerrar.pack(side=tk.RIGHT, padx=4)
+        ToolTip(btn_cerrar, "Cierra esta ventana")
+
+        _aplicar_tema(self.root)
+        self.cargar()
+
+    def _apps_filtradas(self):
+        filtro = self.filtro.get()
+        if filtro == "snap":
+            return [a for a in self._apps if a["tipo"] == "Snap"]
+        if filtro == "flatpak":
+            return [a for a in self._apps if a["tipo"] == "Flatpak"]
+        return list(self._apps)
+
+    def _seleccion(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            return None
+        return self._por_iid.get(seleccion[0])
+
+    def _set_ocupado(self, ocupado, mensaje=None):
+        self._ocupado = ocupado
+        estado = tk.DISABLED if ocupado else tk.NORMAL
+        for boton in (
+            self.btn_refrescar,
+            self.btn_act_sel,
+            self.btn_act_todas,
+            self.btn_desinstalar,
+            self.btn_instalar_fp,
+        ):
+            try:
+                boton.config(state=estado)
+            except tk.TclError:
+                pass
+        if ocupado:
+            self.progreso.start(12)
+            if mensaje:
+                self.lbl_aviso.config(text=mensaje)
+        else:
+            self.progreso.stop()
+
+    def cargar(self):
+        if self._ocupado:
+            return
+        self._set_ocupado(True, "Leyendo aplicaciones instaladas…")
+        self.lbl_resumen.config(text="Cargando lista…")
+
+        def trabajador():
+            snaps, err_snap = _listar_snaps()
+            flats, err_flat = _listar_flatpaks()
+            return {
+                "snaps": snaps,
+                "err_snap": err_snap,
+                "flats": flats,
+                "err_flat": err_flat,
+            }
+
+        def al_terminar(datos):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            self._mostrar(datos)
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Snap Y Flatpak", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajador, al_terminar=al_terminar, al_error=al_error)
+
+    def _mostrar(self, datos):
+        avisos = []
+        self._apps = []
+        if datos["err_snap"] == "no_instalado":
+            avisos.append("Snap no está disponible en este equipo.")
+        elif datos["err_snap"]:
+            avisos.append(f"Snap: {datos['err_snap']}")
+        else:
+            self._apps.extend(datos["snaps"])
+
+        flatpak_ok = True
+        if datos["err_flat"] == "no_instalado":
+            flatpak_ok = False
+            avisos.append("Flatpak no está instalado. Puedes instalarlo desde aquí.")
+            self.btn_instalar_fp.pack(side=tk.LEFT, padx=4, before=self.btn_desinstalar)
+        elif datos["err_flat"]:
+            avisos.append(f"Flatpak: {datos['err_flat']}")
+            self.btn_instalar_fp.pack_forget()
+        else:
+            self._apps.extend(datos["flats"])
+            self.btn_instalar_fp.pack_forget()
+
+        total_snap = sum(a["tamano"] for a in self._apps if a["tipo"] == "Snap")
+        total_flat = sum(a["tamano"] for a in self._apps if a["tipo"] == "Flatpak")
+        n_snap = sum(1 for a in self._apps if a["tipo"] == "Snap")
+        n_flat = sum(1 for a in self._apps if a["tipo"] == "Flatpak")
+        partes = [
+            f"Snap: {n_snap} app(s), {_formato_tamano(total_snap)}",
+            (
+                f"Flatpak: {n_flat} app(s), {_formato_tamano(total_flat)}"
+                if flatpak_ok and not datos["err_flat"]
+                else "Flatpak: no instalado" if not flatpak_ok else f"Flatpak: error al listar"
+            ),
+            f"Total listado: {_formato_tamano(total_snap + total_flat)}",
+        ]
+        self.lbl_resumen.config(text="  ·  ".join(partes))
+        self.lbl_aviso.config(text="\n".join(avisos))
+        self._aplicar_filtro()
+
+    def _aplicar_filtro(self):
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        self._por_iid.clear()
+        visibles = sorted(self._apps_filtradas(), key=lambda a: a["tamano"], reverse=True)
+        for app in visibles:
+            etiqueta_nombre = app["nombre"]
+            if app["tipo"] == "Flatpak" and app["id"] != app["nombre"]:
+                etiqueta_nombre = f"{app['nombre']} ({app['id']})"
+            iid = self.tree.insert(
+                "",
+                tk.END,
+                values=(
+                    app["tipo"],
+                    etiqueta_nombre,
+                    app["version"],
+                    _formato_tamano(app["tamano"]),
+                ),
+            )
+            self._por_iid[iid] = app
+
+    def _actualizar_seleccionada(self):
+        if self._ocupado:
+            return
+        app = self._seleccion()
+        if not app:
+            messagebox.showinfo(
+                "Snap Y Flatpak",
+                "Selecciona una aplicación de la lista.",
+                parent=self.root,
+            )
+            return
+        if not confirmar(
+            f"Se va a buscar una actualización de:\n\n{app['nombre']} ({app['tipo']})\n\n¿Quieres continuar?",
+            self.root,
+            "Actualizar Aplicación",
+        ):
+            return
+        self._ejecutar_accion(
+            lambda: self._hacer_actualizar_una(app),
+            f"Actualizando {app['nombre']}…",
+            "Actualizar aplicación",
+        )
+
+    def _actualizar_todas(self):
+        if self._ocupado:
+            return
+        filtro = self.filtro.get()
+        if filtro == "snap":
+            que = "todas las aplicaciones Snap"
+        elif filtro == "flatpak":
+            que = "todas las aplicaciones Flatpak"
+        else:
+            que = "todas las aplicaciones Snap y Flatpak visibles"
+        if not confirmar(
+            f"Se van a actualizar {que}.\n\nPuede tardar varios minutos.\n\n¿Quieres continuar?",
+            self.root,
+            "Actualizar Todas",
+        ):
+            return
+        self._ejecutar_accion(
+            lambda: self._hacer_actualizar_todas(filtro),
+            "Actualizando aplicaciones…",
+            "Actualizar todas",
+        )
+
+    def _desinstalar(self):
+        if self._ocupado:
+            return
+        app = self._seleccion()
+        if not app:
+            messagebox.showinfo(
+                "Snap Y Flatpak",
+                "Selecciona una aplicación de la lista.",
+                parent=self.root,
+            )
+            return
+        if not confirmar(
+            f"Se va a desinstalar:\n\n{app['nombre']} ({app['tipo']})\n"
+            f"Espacio aproximado: {_formato_tamano(app['tamano'])}\n\n"
+            "¿Quieres quitarla?",
+            self.root,
+            "Desinstalar Aplicación",
+        ):
+            registrar("Desinstalar Snap/Flatpak", f"{app['tipo']}:{app['id']} cancelado", False)
+            return
+        self._ejecutar_accion(
+            lambda: self._hacer_desinstalar(app),
+            f"Desinstalando {app['nombre']}…",
+            "Desinstalar Snap/Flatpak",
+        )
+
+    def _instalar_flatpak(self):
+        if self._ocupado:
+            return
+        if not confirmar(
+            "Se va a instalar Flatpak con APT.\n\n"
+            "Después podrás instalar aplicaciones Flatpak desde otras fuentes.\n\n"
+            "¿Quieres instalarlo?",
+            self.root,
+            "Instalar Flatpak",
+        ):
+            return
+
+        def trabajo():
+            return sudo_run(["apt-get", "install", "-y", "flatpak"], "Instalar Flatpak", timeout=600)
+
+        self._ejecutar_accion(trabajo, "Instalando Flatpak…", "Instalar Flatpak", recargar=True)
+
+    def _hacer_actualizar_una(self, app):
+        if app["tipo"] == "Snap":
+            return sudo_run(["snap", "refresh", app["id"]], f"Actualizar Snap {app['id']}", timeout=600)
+        args = ["flatpak", "update", "-y", app["id"]]
+        if app.get("instalacion") == "user":
+            args = ["flatpak", "update", "-y", "--user", app["id"]]
+            proceso = _comando(args, timeout=600)
+            registrar(f"Actualizar Flatpak {app['id']}", " ".join(args), proceso.returncode == 0)
+            return proceso
+        return sudo_run(args, f"Actualizar Flatpak {app['id']}", timeout=600)
+
+    def _hacer_actualizar_todas(self, filtro):
+        ultimo = None
+        if filtro in ("todos", "snap") and _binario_disponible("snap"):
+            ultimo = sudo_run(["snap", "refresh"], "Actualizar todos los Snap", timeout=900)
+            if ultimo is not None and ultimo.returncode != 0:
+                return ultimo
+        if filtro in ("todos", "flatpak") and _binario_disponible("flatpak"):
+            # Actualiza instalaciones de sistema y de usuario.
+            ultimo = sudo_run(["flatpak", "update", "-y"], "Actualizar Flatpak (system)", timeout=900)
+            if ultimo is not None and ultimo.returncode != 0:
+                return ultimo
+            user = _comando(["flatpak", "update", "-y", "--user"], timeout=900)
+            registrar("Actualizar Flatpak (user)", "flatpak update -y --user", user.returncode == 0)
+            if user.returncode != 0:
+                return user
+            ultimo = user if ultimo is None else ultimo
+        return ultimo
+
+    def _hacer_desinstalar(self, app):
+        if app["tipo"] == "Snap":
+            return sudo_run(["snap", "remove", app["id"]], f"Desinstalar Snap {app['id']}", timeout=600)
+        if app.get("instalacion") == "user":
+            args = ["flatpak", "uninstall", "-y", "--user", app["id"]]
+            proceso = _comando(args, timeout=600)
+            registrar(f"Desinstalar Flatpak {app['id']}", " ".join(args), proceso.returncode == 0)
+            return proceso
+        return sudo_run(
+            ["flatpak", "uninstall", "-y", app["id"]],
+            f"Desinstalar Flatpak {app['id']}",
+            timeout=600,
+        )
+
+    def _ejecutar_accion(self, trabajo, mensaje, titulo, recargar=True):
+        self._set_ocupado(True, mensaje)
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            if resultado is not None and getattr(resultado, "returncode", 0) != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo completar la acción.").strip()
+                messagebox.showerror(titulo, texto, parent=self.root)
+            elif resultado is None:
+                self.lbl_aviso.config(text="Acción cancelada.")
+            else:
+                self.lbl_aviso.config(text="Listo.")
+            if recargar:
+                self.cargar()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror(titulo, str(error), parent=self.root)
+            if recargar:
+                self.cargar()
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+
+
+def _bluetoothctl(args, timeout=30):
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    try:
+        return subprocess.run(
+            ["bluetoothctl", *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=entorno,
+        )
+    except FileNotFoundError:
+        return subprocess.CompletedProcess(["bluetoothctl", *args], 127, "", "bluetoothctl no está instalado")
+    except subprocess.TimeoutExpired as error:
+        return subprocess.CompletedProcess(["bluetoothctl", *args], 1, "", str(error))
+
+
+def _estado_adaptador_bluetooth():
+    """Devuelve (texto_estado, powered_bool_o_None, error_o_None)."""
+    if not shutil.which("bluetoothctl"):
+        return "Bluetooth no disponible (falta bluez / bluetoothctl).", None, "no_instalado"
+    proceso = _bluetoothctl(["show"])
+    if proceso.returncode != 0:
+        texto = (proceso.stderr or proceso.stdout or "No se pudo leer el adaptador.").strip()
+        return texto, None, texto
+    powered = None
+    for linea in proceso.stdout.splitlines():
+        if "Powered:" in linea:
+            powered = "yes" in linea.lower()
+            break
+    if powered is True:
+        return "Adaptador encendido.", True, None
+    if powered is False:
+        return "Adaptador apagado.", False, None
+    return "No se pudo saber si el adaptador está encendido.", None, None
+
+
+def _listar_dispositivos_bluetooth():
+    """Lista dispositivos emparejados con estado conectado/emparejado."""
+    if not shutil.which("bluetoothctl"):
+        return [], "no_instalado"
+    proceso = _bluetoothctl(["devices", "Paired"])
+    if proceso.returncode != 0:
+        # Versiones antiguas pueden no aceptar "Paired": caer a devices.
+        proceso = _bluetoothctl(["devices"])
+        if proceso.returncode != 0:
+            return [], (proceso.stderr or proceso.stdout or "No se pudo listar dispositivos.").strip()
+
+    dispositivos = []
+    for linea in proceso.stdout.splitlines():
+        linea = linea.strip()
+        if not linea.lower().startswith("device "):
+            continue
+        partes = linea.split(None, 2)
+        if len(partes) < 2:
+            continue
+        mac = partes[1]
+        nombre = partes[2] if len(partes) > 2 else mac
+        conectado = False
+        info = _bluetoothctl(["info", mac], timeout=20)
+        if info.returncode == 0:
+            for fila in info.stdout.splitlines():
+                if "Connected:" in fila and "yes" in fila.lower():
+                    conectado = True
+                    break
+        dispositivos.append({
+            "mac": mac,
+            "nombre": nombre,
+            "conectado": conectado,
+        })
+    dispositivos.sort(key=lambda d: (not d["conectado"], d["nombre"].lower()))
+    return dispositivos, None
+
+
+class Bluetooth:
+    """Lista dispositivos Bluetooth, olvida uno o reinicia el servicio."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Bluetooth")
+        self.root.minsize(620, 420)
+        _centrar_ventana(self.root, 700, 480)
+        self._ocupado = False
+        self._por_iid = {}
+
+        tk.Label(self.root, text="Bluetooth", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Dispositivos guardados en este equipo. Si uno no conecta, "
+                "olvidarlo o reiniciar Bluetooth suele bastar (como apagar y encender)."
+            ),
+            wraplength=660,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 6))
+
+        self.lbl_adaptador = tk.Label(
+            self.root,
+            text="Comprobando adaptador…",
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        )
+        self.lbl_adaptador.pack(fill=tk.X, padx=14, pady=(0, 2))
+
+        self.lbl_aviso = tk.Label(self.root, text="", anchor="w", justify=tk.LEFT, wraplength=660)
+        self.lbl_aviso.pack(fill=tk.X, padx=14)
+
+        self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
+        self.progreso.pack(fill=tk.X, padx=14, pady=(2, 4))
+
+        marco_tabla = tk.Frame(self.root)
+        marco_tabla.pack(fill=tk.BOTH, expand=True, padx=14, pady=4)
+        self.tree = ttk.Treeview(
+            marco_tabla,
+            columns=("nombre", "mac", "estado"),
+            show="headings",
+            selectmode="browse",
+        )
+        self.tree.heading("nombre", text="Nombre")
+        self.tree.heading("mac", text="Dirección")
+        self.tree.heading("estado", text="Estado")
+        self.tree.column("nombre", width=280, anchor="w")
+        self.tree.column("mac", width=180, anchor="w")
+        self.tree.column("estado", width=120, anchor="w")
+        scroll = ttk.Scrollbar(marco_tabla, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        marco_botones = tk.Frame(self.root)
+        marco_botones.pack(fill=tk.X, padx=14, pady=10)
+
+        self.btn_actualizar = tk.Button(marco_botones, text="Actualizar lista", command=self.cargar)
+        self.btn_actualizar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_actualizar, "Vuelve a leer el adaptador y los dispositivos emparejados")
+
+        self.btn_olvidar = tk.Button(marco_botones, text="Olvidar seleccionado", command=self._olvidar)
+        self.btn_olvidar.pack(side=tk.LEFT, padx=4)
+        ToolTip(
+            self.btn_olvidar,
+            "Quita el vínculo con el dispositivo elegido. Después habrá que emparejarlo otra vez desde los ajustes de Ubuntu",
+        )
+
+        self.btn_reiniciar = tk.Button(
+            marco_botones, text="Reiniciar Bluetooth", command=self._reiniciar
+        )
+        self.btn_reiniciar.pack(side=tk.LEFT, padx=4)
+        ToolTip(
+            self.btn_reiniciar,
+            "Apaga y vuelve a arrancar el servicio Bluetooth del sistema. Útil cuando los auriculares o el ratón no responden",
+        )
+
+        btn_cerrar = tk.Button(marco_botones, text="Cerrar", command=self.root.destroy)
+        btn_cerrar.pack(side=tk.RIGHT, padx=4)
+        ToolTip(btn_cerrar, "Cierra esta ventana")
+
+        _aplicar_tema(self.root)
+        self.cargar()
+
+    def _seleccion(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            return None
+        return self._por_iid.get(seleccion[0])
+
+    def _set_ocupado(self, ocupado, mensaje=None):
+        self._ocupado = ocupado
+        estado = tk.DISABLED if ocupado else tk.NORMAL
+        for boton in (self.btn_actualizar, self.btn_olvidar, self.btn_reiniciar):
+            try:
+                boton.config(state=estado)
+            except tk.TclError:
+                pass
+        if ocupado:
+            self.progreso.start(12)
+            if mensaje:
+                self.lbl_aviso.config(text=mensaje)
+        else:
+            self.progreso.stop()
+
+    def cargar(self):
+        if self._ocupado:
+            return
+        self._set_ocupado(True, "Leyendo dispositivos Bluetooth…")
+
+        def trabajador():
+            adaptador, powered, err_ad = _estado_adaptador_bluetooth()
+            dispositivos, err_list = _listar_dispositivos_bluetooth()
+            return {
+                "adaptador": adaptador,
+                "powered": powered,
+                "err_ad": err_ad,
+                "dispositivos": dispositivos,
+                "err_list": err_list,
+            }
+
+        def al_terminar(datos):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            self._mostrar(datos)
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Bluetooth", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajador, al_terminar=al_terminar, al_error=al_error)
+
+    def _mostrar(self, datos):
+        self.lbl_adaptador.config(text=datos["adaptador"])
+        avisos = []
+        if datos["err_ad"] == "no_instalado" or datos["err_list"] == "no_instalado":
+            avisos.append(
+                "No está instalado bluetoothctl (paquete bluez). "
+                "En Ubuntu de escritorio suele venir de serie."
+            )
+            self.btn_olvidar.config(state=tk.DISABLED)
+            self.btn_reiniciar.config(state=tk.DISABLED)
+        elif datos["err_list"]:
+            avisos.append(datos["err_list"])
+        elif not datos["dispositivos"]:
+            avisos.append("No hay dispositivos emparejados. Emparéjalos desde los ajustes de Ubuntu.")
+        else:
+            avisos.append(f"{len(datos['dispositivos'])} dispositivo(s) emparejado(s).")
+        self.lbl_aviso.config(text="\n".join(avisos))
+
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        self._por_iid.clear()
+        for dispositivo in datos["dispositivos"]:
+            estado = "conectado" if dispositivo["conectado"] else "emparejado"
+            iid = self.tree.insert(
+                "",
+                tk.END,
+                values=(dispositivo["nombre"], dispositivo["mac"], estado),
+            )
+            self._por_iid[iid] = dispositivo
+
+    def _olvidar(self):
+        if self._ocupado:
+            return
+        dispositivo = self._seleccion()
+        if not dispositivo:
+            messagebox.showinfo(
+                "Bluetooth",
+                "Selecciona un dispositivo de la lista.",
+                parent=self.root,
+            )
+            return
+        if not confirmar(
+            f"Se va a olvidar este dispositivo:\n\n"
+            f"{dispositivo['nombre']}\n{dispositivo['mac']}\n\n"
+            "Después habrá que emparejarlo otra vez desde los ajustes de Ubuntu.\n\n"
+            "¿Quieres olvidarlo?",
+            self.root,
+            "Olvidar Dispositivo",
+        ):
+            registrar("Olvidar Bluetooth", f"{dispositivo['mac']} cancelado", False)
+            return
+
+        def trabajo():
+            resultado = _bluetoothctl(["remove", dispositivo["mac"]], timeout=45)
+            registrar(
+                "Olvidar Bluetooth",
+                f"{dispositivo['nombre']} {dispositivo['mac']}",
+                resultado.returncode == 0,
+            )
+            return resultado
+
+        self._ejecutar(trabajo, f"Olvidando {dispositivo['nombre']}…", "Olvidar Bluetooth")
+
+    def _reiniciar(self):
+        if self._ocupado:
+            return
+        if not confirmar(
+            "Se va a reiniciar el servicio Bluetooth del sistema.\n\n"
+            "Equivale a apagar y encender el Bluetooth. "
+            "Los dispositivos conectados se desconectarán un momento.\n\n"
+            "¿Quieres reiniciarlo?",
+            self.root,
+            "Reiniciar Bluetooth",
+        ):
+            return
+
+        def trabajo():
+            return sudo_run(
+                ["systemctl", "restart", "bluetooth"],
+                "Reiniciar Bluetooth",
+                timeout=120,
+            )
+
+        self._ejecutar(trabajo, "Reiniciando Bluetooth…", "Reiniciar Bluetooth")
+
+    def _ejecutar(self, trabajo, mensaje, titulo):
+        self._set_ocupado(True, mensaje)
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            if resultado is not None and getattr(resultado, "returncode", 0) != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo completar la acción.").strip()
+                messagebox.showerror(titulo, texto, parent=self.root)
+            elif resultado is None:
+                self.lbl_aviso.config(text="Acción cancelada.")
+            else:
+                self.lbl_aviso.config(text="Listo.")
+            self.cargar()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror(titulo, str(error), parent=self.root)
+            self.cargar()
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+
+
+def _listar_unidades_fallidas():
+    """Lista unidades systemd en estado failed."""
+    proceso = _comando(
+        ["systemctl", "--failed", "--no-pager", "--plain", "--no-legend"],
+        timeout=40,
+    )
+    if proceso.returncode not in (0, 1):
+        # systemctl --failed puede devolver 0 con lista vacía
+        error = (proceso.stderr or proceso.stdout or "No se pudo listar unidades fallidas.").strip()
+        return [], error
+    unidades = []
+    for linea in proceso.stdout.splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("●"):
+            continue
+        partes = linea.split(None, 4)
+        if len(partes) < 4:
+            continue
+        nombre, _load, activo, sub = partes[0], partes[1], partes[2], partes[3]
+        descripcion = partes[4] if len(partes) > 4 else ""
+        unidades.append({
+            "unidad": nombre,
+            "estado": activo,
+            "subestado": sub,
+            "descripcion": descripcion,
+        })
+    unidades.sort(key=lambda u: u["unidad"].lower())
+    return unidades, None
+
+
+def _log_corto_unidad(unidad):
+    """Últimas líneas del journal de una unidad. Prueba sin sudo y con sudo."""
+    args = ["journalctl", "-u", unidad, "-n", "40", "--no-pager", "-o", "short-iso"]
+    proceso = _comando(args, timeout=40)
+    if proceso.returncode == 0 and (proceso.stdout or "").strip():
+        return proceso.stdout.strip(), None
+    # Algunos journals necesitan privilegios
+    con_sudo = sudo_run(args, f"Log de {unidad}", timeout=40)
+    if con_sudo is None:
+        return None, "cancelado"
+    if con_sudo.returncode != 0:
+        texto = (con_sudo.stderr or con_sudo.stdout or proceso.stderr or "No se pudo leer el log.").strip()
+        return None, texto
+    return (con_sudo.stdout or "").strip() or "(Sin entradas recientes en el registro.)", None
+
+
+class ServiciosFallidos:
+    """Lista unidades systemd en failed y permite reiniciarlas o ver un log corto."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Servicios Que Fallan")
+        self.root.minsize(700, 480)
+        _centrar_ventana(self.root, 820, 560)
+        self._ocupado = False
+        self._por_iid = {}
+
+        tk.Label(self.root, text="Servicios que fallan", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Unidades que systemd marca como fallidas. "
+                "Puedes reiniciarlas o ver las últimas líneas del registro."
+            ),
+            wraplength=780,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 6))
+
+        self.lbl_estado = tk.Label(self.root, text="Cargando…", font=("Arial", 11, "bold"), anchor="w")
+        self.lbl_estado.pack(fill=tk.X, padx=14, pady=(0, 2))
+
+        self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
+        self.progreso.pack(fill=tk.X, padx=14, pady=(0, 4))
+
+        marco_tabla = tk.Frame(self.root)
+        marco_tabla.pack(fill=tk.BOTH, expand=True, padx=14, pady=4)
+        self.tree = ttk.Treeview(
+            marco_tabla,
+            columns=("unidad", "estado", "descripcion"),
+            show="headings",
+            selectmode="browse",
+            height=8,
+        )
+        self.tree.heading("unidad", text="Unidad")
+        self.tree.heading("estado", text="Estado")
+        self.tree.heading("descripcion", text="Descripción")
+        self.tree.column("unidad", width=320, anchor="w")
+        self.tree.column("estado", width=100, anchor="w")
+        self.tree.column("descripcion", width=320, anchor="w")
+        self.tree.tag_configure("failed", foreground="#c0392b")
+        scroll = ttk.Scrollbar(marco_tabla, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        marco_botones = tk.Frame(self.root)
+        marco_botones.pack(fill=tk.X, padx=14, pady=6)
+
+        self.btn_actualizar = tk.Button(marco_botones, text="Actualizar lista", command=self.cargar)
+        self.btn_actualizar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_actualizar, "Vuelve a leer las unidades en fallo")
+
+        self.btn_reiniciar = tk.Button(
+            marco_botones, text="Reiniciar seleccionada", command=self._reiniciar
+        )
+        self.btn_reiniciar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_reiniciar, "Reinicia la unidad fallida seleccionada")
+
+        self.btn_log = tk.Button(marco_botones, text="Ver log corto", command=self._ver_log)
+        self.btn_log.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_log, "Muestra las últimas 40 líneas del registro de esa unidad")
+
+        btn_cerrar = tk.Button(marco_botones, text="Cerrar", command=self.root.destroy)
+        btn_cerrar.pack(side=tk.RIGHT, padx=4)
+        ToolTip(btn_cerrar, "Cierra esta ventana")
+
+        tk.Label(self.root, text="Log corto", anchor="w").pack(fill=tk.X, padx=14)
+        self.log = scrolledtext.ScrolledText(self.root, height=10, wrap=tk.WORD)
+        self.log.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 10))
+        self.log.insert(tk.END, "Selecciona una unidad y pulsa «Ver log corto».")
+        self.log.config(state=tk.DISABLED)
+
+        _aplicar_tema(self.root)
+        self.cargar()
+
+    def _seleccion(self):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            return None
+        return self._por_iid.get(seleccion[0])
+
+    def _set_ocupado(self, ocupado, mensaje=None):
+        self._ocupado = ocupado
+        estado = tk.DISABLED if ocupado else tk.NORMAL
+        for boton in (self.btn_actualizar, self.btn_reiniciar, self.btn_log):
+            try:
+                boton.config(state=estado)
+            except tk.TclError:
+                pass
+        if ocupado:
+            self.progreso.start(12)
+            if mensaje:
+                self.lbl_estado.config(text=mensaje, fg="#2471a3")
+        else:
+            self.progreso.stop()
+
+    def _poner_log(self, texto):
+        self.log.config(state=tk.NORMAL)
+        self.log.delete("1.0", tk.END)
+        self.log.insert(tk.END, texto)
+        self.log.config(state=tk.DISABLED)
+
+    def cargar(self):
+        if self._ocupado:
+            return
+        self._set_ocupado(True, "Buscando unidades en fallo…")
+
+        def trabajador():
+            return _listar_unidades_fallidas()
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            unidades, error = resultado
+            self._mostrar(unidades, error)
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Servicios Que Fallan", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajador, al_terminar=al_terminar, al_error=al_error)
+
+    def _mostrar(self, unidades, error):
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        self._por_iid.clear()
+        if error:
+            self.lbl_estado.config(text=error, fg="#c0392b")
+            return
+        if not unidades:
+            self.lbl_estado.config(text="No hay unidades en fallo.", fg="#1e8449")
+            self._poner_log("No hay unidades fallidas ahora mismo.")
+            return
+        self.lbl_estado.config(
+            text=f"{len(unidades)} unidad(es) en fallo.",
+            fg="#c0392b",
+        )
+        for item in unidades:
+            estado = f"{item['estado']} / {item['subestado']}"
+            iid = self.tree.insert(
+                "",
+                tk.END,
+                values=(item["unidad"], estado, item["descripcion"]),
+                tags=("failed",),
+            )
+            self._por_iid[iid] = item
+
+    def _reiniciar(self):
+        if self._ocupado:
+            return
+        unidad = self._seleccion()
+        if not unidad:
+            messagebox.showinfo(
+                "Servicios Que Fallan",
+                "Selecciona una unidad de la lista.",
+                parent=self.root,
+            )
+            return
+        nombre = unidad["unidad"]
+        if not confirmar(
+            f"Se va a reiniciar:\n\n{nombre}\n\n"
+            "Si sigue fallando, mira el log corto para ver el motivo.\n\n¿Quieres reiniciarla?",
+            self.root,
+            "Reiniciar Unidad",
+        ):
+            return
+
+        def trabajo():
+            return sudo_run(["systemctl", "restart", nombre], f"Reiniciar {nombre}", timeout=120)
+
+        self._set_ocupado(True, f"Reiniciando {nombre}…")
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            if resultado is not None and resultado.returncode != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo reiniciar.").strip()
+                messagebox.showerror("Servicios Que Fallan", texto, parent=self.root)
+            elif resultado is None:
+                self.lbl_estado.config(text="Reinicio cancelado.", fg="#2471a3")
+            else:
+                self.lbl_estado.config(text=f"Reinicio de {nombre} pedido.", fg="#1e8449")
+            self.cargar()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Servicios Que Fallan", str(error), parent=self.root)
+            self.cargar()
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _ver_log(self):
+        if self._ocupado:
+            return
+        unidad = self._seleccion()
+        if not unidad:
+            messagebox.showinfo(
+                "Servicios Que Fallan",
+                "Selecciona una unidad de la lista.",
+                parent=self.root,
+            )
+            return
+        nombre = unidad["unidad"]
+        self._set_ocupado(True, f"Leyendo log de {nombre}…")
+
+        def trabajo():
+            return _log_corto_unidad(nombre)
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            texto, error = resultado
+            if error == "cancelado":
+                self.lbl_estado.config(text="Lectura del log cancelada.", fg="#2471a3")
+                return
+            if error:
+                messagebox.showerror("Servicios Que Fallan", error, parent=self.root)
+                self._poner_log(error)
+                return
+            self._poner_log(texto or "(Vacío)")
+            self.lbl_estado.config(text=f"Log de {nombre} (últimas 40 líneas).", fg="#2471a3")
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Servicios Que Fallan", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)

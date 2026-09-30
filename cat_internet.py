@@ -420,10 +420,34 @@ class RedTools:
     def set_area_central(self, area_central):
         self.area_central = area_central
 
+    def _aplicar_tema(self):
+        if self.area_central is not None:
+            preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+
+    def _titulo(self, texto, tamano=14, **kwargs):
+        return tk.Label(
+            self.area_central,
+            text=texto,
+            font=("Arial", tamano, "bold"),
+            bg=preferencias.color_fondo(),
+            fg=preferencias.color_texto(),
+            **kwargs,
+        )
+
+    def _etiqueta(self, texto, tamano=12, **kwargs):
+        return tk.Label(
+            self.area_central,
+            text=texto,
+            font=("Arial", tamano),
+            bg=preferencias.color_fondo(),
+            fg=preferencias.color_texto(),
+            **kwargs,
+        )
+
     def escanear_puertos(self):
         self.limpiar_area_central()
-        tk.Label(self.area_central, text="Escaneo de Puertos", font=("Arial", 14, "bold")).pack(pady=10)
-        tk.Label(self.area_central, text="Introduce la IP a escanear:", font=("Arial", 12)).pack(pady=5)
+        self._titulo("Escaneo de Puertos").pack(pady=10)
+        self._etiqueta("Introduce la IP a escanear:").pack(pady=5)
         entry_ip = entradaConPlaceHolder(self.area_central, placeholder="Ejemplo de IP: 8.8.8.8", width=30)
         entry_ip.pack(pady=5)
         resultado_text = tk.Text(self.area_central, height=20, width=80)
@@ -461,10 +485,11 @@ class RedTools:
         boton_escanear = tk.Button(self.area_central, text="Escanear Puertos", width=20, command=iniciar_escaneo)
         boton_escanear.pack(pady=10)
         ToolTip(boton_escanear, "Inicia el escaneo de puertos de la IP indicada")
+        self._aplicar_tema()
 
     def test_velocidad(self):
         self.limpiar_area_central()
-        tk.Label(self.area_central, text="Test de Velocidad de Internet", font=("Arial", 14, "bold")).pack(pady=10)
+        self._titulo("Test de Velocidad de Internet").pack(pady=10)
         resultado_text = tk.Text(self.area_central, height=20, width=80)
         resultado_text.pack(pady=10)
 
@@ -490,12 +515,12 @@ class RedTools:
         boton_iniciar_test = tk.Button(self.area_central, text="Iniciar Test", command=realizar_test)
         boton_iniciar_test.pack(pady=10)
         ToolTip(boton_iniciar_test, "Inicia el Test de Velocidad")
+        self._aplicar_tema()
 
     def diagnostico_red(self):
-        for widget in self.area_central.winfo_children():
-            widget.destroy()
-        tk.Label(self.area_central, text="Diagnóstico de Red", font=("Arial", 14, "bold")).pack(pady=10)
-        resultado_text_frame = tk.Frame(self.area_central)
+        self.limpiar_area_central()
+        self._titulo("Diagnóstico de Red").pack(pady=10)
+        resultado_text_frame = tk.Frame(self.area_central, bg=preferencias.color_fondo())
         resultado_text_frame.pack(pady=10)
         resultado_text = scrolledtext.ScrolledText(resultado_text_frame, height=20, width=80, wrap=tk.NONE)
         resultado_text.pack(expand=True, fill=tk.BOTH)
@@ -523,17 +548,13 @@ class RedTools:
         boton_iniciar_diagnostico = tk.Button(self.area_central, text="Iniciar Diagnóstico", command=realizar_diagnostico)
         boton_iniciar_diagnostico.pack(pady=10)
         ToolTip(boton_iniciar_diagnostico, "Haz clic para iniciar el diagnóstico de la red")
+        self._aplicar_tema()
 
     def nivel_ruido(self, interfaz=""):
         self.limpiar_area_central()
-        tk.Label(
-            self.area_central,
-            text="Nivel de ruido de la conexión",
-            font=("Arial", 14, "bold"),
-        ).pack(pady=10)
-        tk.Label(
-            self.area_central,
-            text="Wi-Fi: ruido de radio y SNR. Internet: pérdida de paquetes y jitter.",
+        self._titulo("Nivel de ruido de la conexión").pack(pady=10)
+        self._etiqueta(
+            "Wi-Fi: ruido de radio y SNR. Internet: pérdida de paquetes y jitter.",
             wraplength=520,
         ).pack(pady=(0, 6))
         resultado = scrolledtext.ScrolledText(self.area_central, height=18, width=80, wrap=tk.WORD)
@@ -558,6 +579,7 @@ class RedTools:
         boton = tk.Button(self.area_central, text="Medir ahora", command=medir)
         boton.pack(pady=8)
         ToolTip(boton, "Mide el ruido de radio (Wi-Fi) y la estabilidad de la ruta a Internet")
+        self._aplicar_tema()
         medir()
 
     def limpiar_area_central(self):

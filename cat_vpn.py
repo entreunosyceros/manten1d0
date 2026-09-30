@@ -49,6 +49,76 @@ def expressvpn_disponible():
     return ruta_expressvpnctl() is not None
 
 
+def _interfaces_tunel():
+    """Nombres de interfaces típicas de VPN que están arriba y tienen IPv4."""
+    encontradas = []
+    try:
+        proceso = subprocess.run(
+            ["ip", "-o", "-4", "addr", "show", "up"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return encontradas
+    for linea in proceso.stdout.splitlines():
+        partes = linea.split()
+        if len(partes) < 2:
+            continue
+        nombre = partes[1]
+        bajo = nombre.lower()
+        if bajo.startswith(("tun", "tap", "wg", "zt", "nordlynx", "ppp")) or "vpn" in bajo:
+            encontradas.append(nombre)
+    return encontradas
+
+
+def vpn_en_uso():
+    """
+    Detecta si el equipo usa una VPN ahora mismo.
+
+    Returns:
+        tuple: (activa: bool, texto_corto: str, detalle_tooltip: str)
+    """
+    if expressvpn_disponible():
+        resultado = _ctl(["get", "connectionstate"], timeout=4)
+        if resultado.returncode == 0:
+            estado = (resultado.stdout or "").strip()
+            if estado == "Connected":
+                return (
+                    True,
+                    "VPN: sí (ExpressVPN)",
+                    "ExpressVPN está conectada. La IP pública suele ser la del túnel",
+                )
+            if estado in (
+                "Connecting",
+                "Reconnecting",
+                "DisconnectingToReconnect",
+                "Interrupted",
+            ):
+                etiqueta = _ESTADOS.get(estado, estado)
+                return (
+                    True,
+                    f"VPN: {etiqueta.lower()}",
+                    f"ExpressVPN está en estado «{etiqueta}»",
+                )
+
+    tuneles = _interfaces_tunel()
+    if tuneles:
+        lista = ", ".join(tuneles[:3])
+        return (
+            True,
+            "VPN: sí",
+            f"Hay un túnel de red activo ({lista}). Puede ser una VPN u otro programa similar",
+        )
+
+    return (
+        False,
+        "VPN: no",
+        "No se detecta una VPN activa (ni ExpressVPN conectada ni túnel típico)",
+    )
+
+
 def _centrar(ventana, ancho, alto):
     ventana.update_idletasks()
     x = (ventana.winfo_screenwidth() - ancho) // 2

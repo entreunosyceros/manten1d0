@@ -1,8 +1,17 @@
 # Historial de versiones
 
-Cambios de Manten1d0 anteriores a la [versión 0.6.0](README.md).
+Cambios de Manten1d0 anteriores a la [versión 0.7.0](README.md).
 
 ------------------------------------------------------------------
+
+## Versión 0.6.0
+
+- Avisos de inicio en lenguaje llano: disco lleno (carpetas que más ocupan), reinicio pendiente y cortafuegos (ufw).
+- Sistema: espacio por disco, limpieza de versiones viejas del núcleo, historial de comandos e impresoras.
+- Archivos: copiar Documentos o el escritorio a un USB.
+- Internet: indicador de IP privada y pública; VPN solo ExpressVPN.
+- Red local: compartir carpeta (Samba) y encender un PC por red (WoL).
+- Tema oscuro alineado con el del sistema (GTK).
 
 ## Versión 0.5.7
 
