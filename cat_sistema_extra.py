@@ -1,7 +1,8 @@
 """
 Herramientas extra de la categoría Sistema:
 limpieza de espacio en disco, salud SMART, uso por carpetas, cortafuegos,
-servicios systemd (incluidos los que fallan), Snap/Flatpak y Bluetooth.
+servicios systemd (incluidos los que fallan), Snap/Flatpak, Bluetooth,
+sonido y pantallas.
 """
 
 import json
@@ -3497,3 +3498,717 @@ class ServiciosFallidos:
             messagebox.showerror("Servicios Que Fallan", str(error), parent=self.root)
 
         en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+
+
+def _motor_audio():
+    """Devuelve 'pipewire', 'pulseaudio' o None."""
+    if shutil.which("wpctl") or shutil.which("pipewire"):
+        # En Ubuntu moderno pactl habla con PipeWire; priorizar PipeWire si el binario existe.
+        if shutil.which("pipewire"):
+            return "pipewire"
+    if shutil.which("pactl") or shutil.which("pulseaudio"):
+        return "pulseaudio"
+    return None
+
+
+def _pactl(args, timeout=20):
+    if not shutil.which("pactl"):
+        return subprocess.CompletedProcess(["pactl", *args], 127, "", "pactl no está instalado")
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    try:
+        return subprocess.run(
+            ["pactl", *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=entorno,
+        )
+    except subprocess.TimeoutExpired as error:
+        return subprocess.CompletedProcess(["pactl", *args], 1, "", str(error))
+
+
+def _listar_salidas_audio():
+    """Lista sinks: [{id, nombre, estado, defecto}]."""
+    defecto = ""
+    rdef = _pactl(["get-default-sink"])
+    if rdef.returncode == 0:
+        defecto = (rdef.stdout or "").strip()
+    proceso = _pactl(["list", "short", "sinks"])
+    if proceso.returncode != 0:
+        return [], defecto, (proceso.stderr or proceso.stdout or "No se pudieron listar las salidas.").strip()
+    salidas = []
+    for linea in proceso.stdout.splitlines():
+        partes = linea.split("\t")
+        if len(partes) < 2:
+            partes = linea.split()
+        if len(partes) < 2:
+            continue
+        nombre = partes[1]
+        estado = partes[-1] if len(partes) >= 5 else ""
+        salidas.append({
+            "id": partes[0],
+            "nombre": nombre,
+            "estado": estado,
+            "defecto": nombre == defecto,
+            "etiqueta": _etiqueta_salida_audio(nombre),
+        })
+    return salidas, defecto, None
+
+
+def _etiqueta_salida_audio(nombre):
+    bajo = (nombre or "").lower()
+    if "hdmi" in bajo:
+        return "HDMI / TV"
+    if "headphone" in bajo or "headset" in bajo or "bluez" in bajo:
+        return "Auriculares"
+    if "analog" in bajo or "speaker" in bajo:
+        return "Altavoces"
+    if "usb" in bajo:
+        return "USB"
+    corto = nombre.split(".")[-1] if "." in nombre else nombre
+    return corto.replace("-", " ")[:40]
+
+
+def _reiniciar_audio():
+    motor = _motor_audio()
+    entorno = os.environ.copy()
+    entorno["LC_ALL"] = "C"
+    if motor == "pipewire":
+        args = [
+            "systemctl",
+            "--user",
+            "restart",
+            "pipewire.service",
+            "pipewire-pulse.service",
+            "wireplumber.service",
+        ]
+        try:
+            resultado = subprocess.run(args, capture_output=True, text=True, timeout=60, env=entorno)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+            return None, str(error)
+        registrar("Reiniciar audio", "pipewire/wireplumber", resultado.returncode == 0)
+        if resultado.returncode == 0:
+            registrar_comando("Reiniciar audio", args, sudo=False, tipo="args")
+        return resultado, None
+    # PulseAudio clásico
+    if not shutil.which("pulseaudio"):
+        return None, "No se encontró PipeWire ni PulseAudio."
+    try:
+        muerto = subprocess.run(
+            ["pulseaudio", "-k"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=entorno,
+        )
+        # -k puede devolver error si no había demonio; igual intentamos arrancar
+        arranque = subprocess.run(
+            ["pulseaudio", "--start"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            env=entorno,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        return None, str(error)
+    ok = arranque.returncode == 0
+    registrar("Reiniciar audio", "pulseaudio -k/--start", ok)
+    if ok:
+        registrar_comando("Reiniciar audio", ["pulseaudio", "--start"], sudo=False, tipo="args")
+    if not ok:
+        texto = (arranque.stderr or muerto.stderr or "No se pudo reiniciar PulseAudio.").strip()
+        return arranque, texto
+    return arranque, None
+
+
+class Sonido:
+    """Reinicia el audio y cambia la salida por defecto (auriculares / HDMI)."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Sonido")
+        self.root.minsize(560, 420)
+        _centrar_ventana(self.root, 620, 480)
+        self._ocupado = False
+        self._salidas = []
+
+        tk.Label(self.root, text="Sonido", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Si no hay audio tras enchufar auriculares o la TV por HDMI, "
+                "reiniciar el servicio de sonido suele bastar. También puedes elegir la salida."
+            ),
+            wraplength=580,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 6))
+
+        self.lbl_estado = tk.Label(
+            self.root, text="Comprobando…", font=("Arial", 11, "bold"), anchor="w", wraplength=580, justify=tk.LEFT
+        )
+        self.lbl_estado.pack(fill=tk.X, padx=14, pady=(0, 4))
+
+        self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
+        self.progreso.pack(fill=tk.X, padx=14, pady=(0, 4))
+
+        marco_lista = tk.Frame(self.root)
+        marco_lista.pack(fill=tk.BOTH, expand=True, padx=14, pady=4)
+        self.lista = tk.Listbox(marco_lista, height=8)
+        self.lista.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll = ttk.Scrollbar(marco_lista, orient="vertical", command=self.lista.yview)
+        self.lista.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        marco = tk.Frame(self.root)
+        marco.pack(fill=tk.X, padx=14, pady=10)
+
+        self.btn_actualizar = tk.Button(marco, text="Actualizar", command=self.cargar)
+        self.btn_actualizar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_actualizar, "Vuelve a leer el motor de audio y las salidas")
+
+        self.btn_usar = tk.Button(marco, text="Usar esta salida", command=self._usar_salida)
+        self.btn_usar.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_usar, "Pone la salida seleccionada como la de audio por defecto")
+
+        self.btn_reiniciar = tk.Button(marco, text="Reiniciar audio", command=self._reiniciar)
+        self.btn_reiniciar.pack(side=tk.LEFT, padx=4)
+        ToolTip(
+            self.btn_reiniciar,
+            "Reinicia PipeWire o PulseAudio. Útil cuando no hay sonido tras auriculares o HDMI",
+        )
+
+        self.btn_ajustes = tk.Button(marco, text="Ajustes de sonido", command=self._abrir_ajustes)
+        self.btn_ajustes.pack(side=tk.LEFT, padx=4)
+        ToolTip(self.btn_ajustes, "Abre los ajustes de sonido de GNOME")
+
+        btn_cerrar = tk.Button(marco, text="Cerrar", command=self.root.destroy)
+        btn_cerrar.pack(side=tk.RIGHT, padx=4)
+        ToolTip(btn_cerrar, "Cierra esta ventana")
+
+        _aplicar_tema(self.root)
+        self.cargar()
+
+    def _set_ocupado(self, ocupado, mensaje=None):
+        self._ocupado = ocupado
+        estado = tk.DISABLED if ocupado else tk.NORMAL
+        for boton in (self.btn_actualizar, self.btn_usar, self.btn_reiniciar, self.btn_ajustes):
+            try:
+                boton.config(state=estado)
+            except tk.TclError:
+                pass
+        if ocupado:
+            self.progreso.start(12)
+            if mensaje:
+                self.lbl_estado.config(text=mensaje, fg="#2471a3")
+        else:
+            self.progreso.stop()
+
+    def cargar(self):
+        if self._ocupado:
+            return
+        self._set_ocupado(True, "Leyendo salidas de audio…")
+
+        def trabajo():
+            motor = _motor_audio()
+            salidas, defecto, error = _listar_salidas_audio()
+            return {"motor": motor, "salidas": salidas, "defecto": defecto, "error": error}
+
+        def al_terminar(datos):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            self._mostrar(datos)
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Sonido", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _mostrar(self, datos):
+        self.lista.delete(0, tk.END)
+        self._salidas = datos.get("salidas") or []
+        motor = datos.get("motor")
+        if not motor and not shutil.which("pactl"):
+            self.lbl_estado.config(
+                text="No se encontró PipeWire ni PulseAudio (falta pactl).",
+                fg="#c0392b",
+            )
+            return
+        nombre_motor = "PipeWire" if motor == "pipewire" else "PulseAudio" if motor == "pulseaudio" else "Desconocido"
+        if datos.get("error"):
+            self.lbl_estado.config(text=datos["error"], fg="#c0392b")
+            return
+        defecto = datos.get("defecto") or "—"
+        etiqueta_def = next((s["etiqueta"] for s in self._salidas if s["defecto"]), defecto)
+        self.lbl_estado.config(
+            text=f"Motor: {nombre_motor}. Salida por defecto: {etiqueta_def}",
+            fg="#1e8449" if self._salidas else "#b36b00",
+        )
+        if not self._salidas:
+            self.lista.insert(tk.END, "No hay salidas de audio visibles.")
+            return
+        for salida in self._salidas:
+            marca = "★ " if salida["defecto"] else "  "
+            self.lista.insert(
+                tk.END,
+                f"{marca}{salida['etiqueta']}  —  {salida['nombre']}  ({salida['estado']})",
+            )
+
+    def _usar_salida(self):
+        if self._ocupado:
+            return
+        sel = self.lista.curselection()
+        if not sel or sel[0] >= len(self._salidas):
+            messagebox.showinfo("Sonido", "Selecciona una salida de la lista.", parent=self.root)
+            return
+        salida = self._salidas[sel[0]]
+        if not confirmar(
+            f"Se va a usar esta salida de audio:\n\n{salida['etiqueta']}\n{salida['nombre']}\n\n¿Continuar?",
+            self.root,
+            "Usar Esta Salida",
+        ):
+            return
+
+        def trabajo():
+            resultado = _pactl(["set-default-sink", salida["nombre"]])
+            registrar("Salida de audio", salida["nombre"], resultado.returncode == 0)
+            return resultado
+
+        self._set_ocupado(True, "Cambiando salida…")
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            if resultado.returncode != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo cambiar la salida.").strip()
+                messagebox.showerror("Sonido", texto, parent=self.root)
+            self.cargar()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Sonido", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _reiniciar(self):
+        if self._ocupado:
+            return
+        if not confirmar(
+            "Se va a reiniciar el servicio de sonido (PipeWire o PulseAudio).\n\n"
+            "El audio se corta un momento. Útil cuando no hay sonido tras auriculares o HDMI.\n\n"
+            "¿Reiniciarlo?",
+            self.root,
+            "Reiniciar Audio",
+        ):
+            return
+
+        def trabajo():
+            return _reiniciar_audio()
+
+        self._set_ocupado(True, "Reiniciando audio…")
+
+        def al_terminar(par):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            resultado, error = par
+            if error:
+                messagebox.showerror("Sonido", error, parent=self.root)
+            elif resultado is not None and resultado.returncode != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo reiniciar el audio.").strip()
+                messagebox.showerror("Sonido", texto, parent=self.root)
+            else:
+                self.lbl_estado.config(text="Audio reiniciado.", fg="#1e8449")
+            self.cargar()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Sonido", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _abrir_ajustes(self):
+        for comando in (["gnome-control-center", "sound"], ["pavucontrol"]):
+            try:
+                subprocess.Popen(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                continue
+        messagebox.showinfo(
+            "Sonido",
+            "No se encontró el configurador de sonido de GNOME.",
+            parent=self.root,
+        )
+
+
+def _es_salida_interna(nombre):
+    bajo = (nombre or "").upper()
+    return bajo.startswith(("EDP", "LVDS", "DSI"))
+
+
+def _es_salida_externa(nombre):
+    bajo = (nombre or "").upper()
+    return bajo.startswith(("HDMI", "DP", "DISPLAYPORT", "VGA", "DVI")) or bajo.startswith("DP-")
+
+
+def _listar_pantallas():
+    if not shutil.which("xrandr"):
+        return [], "Falta el comando xrandr."
+    proceso = _comando(["xrandr", "--query"], timeout=20)
+    if proceso.returncode != 0:
+        return [], (proceso.stderr or proceso.stdout or "No se pudo leer xrandr.").strip()
+    pantallas = []
+    for linea in proceso.stdout.splitlines():
+        if " connected" not in linea and " disconnected" not in linea:
+            continue
+        partes = linea.split()
+        if not partes:
+            continue
+        nombre = partes[0]
+        conectada = " connected" in linea
+        primaria = "primary" in linea
+        resolucion = "—"
+        if conectada:
+            coincidencia = re.search(r"(\d+x\d+\+\d+\+\d+)", linea)
+            if coincidencia:
+                resolucion = coincidencia.group(1).split("+")[0]
+            else:
+                coincidencia = re.search(r"(\d+x\d+)", linea)
+                if coincidencia:
+                    resolucion = coincidencia.group(1)
+        tipo = "interna" if _es_salida_interna(nombre) else "externa" if _es_salida_externa(nombre) else "otra"
+        pantallas.append({
+            "nombre": nombre,
+            "conectada": conectada,
+            "primaria": primaria,
+            "resolucion": resolucion if conectada else "—",
+            "tipo": tipo,
+        })
+    return pantallas, None
+
+
+def _elegir_interna_externa(pantallas):
+    conectadas = [p for p in pantallas if p["conectada"]]
+    internas = [p for p in conectadas if p["tipo"] == "interna"]
+    externas = [p for p in conectadas if p["tipo"] == "externa"]
+    primaria = next((p for p in conectadas if p["primaria"]), None)
+    interna = internas[0] if internas else primaria or (conectadas[0] if conectadas else None)
+    externa = None
+    for candidata in externas:
+        if interna is None or candidata["nombre"] != interna["nombre"]:
+            externa = candidata
+            break
+    if externa is None and len(conectadas) >= 2:
+        for candidata in conectadas:
+            if interna is None or candidata["nombre"] != interna["nombre"]:
+                externa = candidata
+                break
+    return interna, externa
+
+
+def _xrandr_args(args):
+    return _comando(["xrandr", *args], timeout=30)
+
+
+class Pantallas:
+    """Lista monitores y aplica espejo / extendido básico con xrandr."""
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Pantallas")
+        self.root.minsize(620, 440)
+        _centrar_ventana(self.root, 700, 500)
+        self._ocupado = False
+        self._pantallas = []
+        self._por_iid = {}
+
+        tk.Label(self.root, text="Pantallas", font=("Arial", 14, "bold")).pack(pady=(12, 4))
+        tk.Label(
+            self.root,
+            text=(
+                "Detecta monitores o la TV y elige espejo, escritorio extendido o una sola pantalla. "
+                "Para opciones avanzadas usa los ajustes de GNOME."
+            ),
+            wraplength=660,
+            justify=tk.LEFT,
+        ).pack(padx=14, pady=(0, 6))
+
+        self.lbl_estado = tk.Label(
+            self.root, text="Comprobando…", font=("Arial", 11, "bold"), anchor="w", wraplength=660, justify=tk.LEFT
+        )
+        self.lbl_estado.pack(fill=tk.X, padx=14, pady=(0, 4))
+
+        self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
+        self.progreso.pack(fill=tk.X, padx=14, pady=(0, 4))
+
+        marco_tabla = tk.Frame(self.root)
+        marco_tabla.pack(fill=tk.BOTH, expand=True, padx=14, pady=4)
+        self.tree = ttk.Treeview(
+            marco_tabla,
+            columns=("nombre", "estado", "resolucion", "tipo"),
+            show="headings",
+            selectmode="browse",
+            height=7,
+        )
+        self.tree.heading("nombre", text="Salida")
+        self.tree.heading("estado", text="Estado")
+        self.tree.heading("resolucion", text="Resolución")
+        self.tree.heading("tipo", text="Tipo")
+        self.tree.column("nombre", width=140)
+        self.tree.column("estado", width=140)
+        self.tree.column("resolucion", width=120)
+        self.tree.column("tipo", width=100)
+        scroll = ttk.Scrollbar(marco_tabla, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.LEFT, fill=tk.Y)
+
+        marco = tk.Frame(self.root)
+        marco.pack(fill=tk.X, padx=14, pady=8)
+
+        self.btn_actualizar = tk.Button(marco, text="Detectar de nuevo", command=self._detectar)
+        self.btn_actualizar.pack(side=tk.LEFT, padx=3)
+        ToolTip(self.btn_actualizar, "Vuelve a leer monitores y enciende las salidas conectadas")
+
+        self.btn_solo = tk.Button(marco, text="Solo esta", command=self._solo_esta)
+        self.btn_solo.pack(side=tk.LEFT, padx=3)
+        ToolTip(self.btn_solo, "Deja solo la pantalla seleccionada y apaga las demás")
+
+        self.btn_extender = tk.Button(marco, text="Extender", command=self._extender)
+        self.btn_extender.pack(side=tk.LEFT, padx=3)
+        ToolTip(self.btn_extender, "Pone la pantalla externa a la derecha de la interna")
+
+        self.btn_espejo = tk.Button(marco, text="Espejo", command=self._espejo)
+        self.btn_espejo.pack(side=tk.LEFT, padx=3)
+        ToolTip(self.btn_espejo, "Muestra lo mismo en la pantalla interna y en la externa / TV")
+
+        self.btn_gnome = tk.Button(marco, text="Ajustes GNOME", command=self._abrir_gnome)
+        self.btn_gnome.pack(side=tk.LEFT, padx=3)
+        ToolTip(self.btn_gnome, "Abre los ajustes de pantallas de GNOME")
+
+        btn_cerrar = tk.Button(marco, text="Cerrar", command=self.root.destroy)
+        btn_cerrar.pack(side=tk.RIGHT, padx=3)
+        ToolTip(btn_cerrar, "Cierra esta ventana")
+
+        _aplicar_tema(self.root)
+        self.cargar()
+
+    def _seleccion(self):
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        return self._por_iid.get(sel[0])
+
+    def _set_ocupado(self, ocupado, mensaje=None):
+        self._ocupado = ocupado
+        estado = tk.DISABLED if ocupado else tk.NORMAL
+        for boton in (
+            self.btn_actualizar,
+            self.btn_solo,
+            self.btn_extender,
+            self.btn_espejo,
+            self.btn_gnome,
+        ):
+            try:
+                boton.config(state=estado)
+            except tk.TclError:
+                pass
+        if ocupado:
+            self.progreso.start(12)
+            if mensaje:
+                self.lbl_estado.config(text=mensaje, fg="#2471a3")
+        else:
+            self.progreso.stop()
+
+    def cargar(self):
+        if self._ocupado:
+            return
+        self._set_ocupado(True, "Leyendo pantallas…")
+
+        def trabajo():
+            return _listar_pantallas()
+
+        def al_terminar(par):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            pantallas, error = par
+            self._mostrar(pantallas, error)
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror("Pantallas", str(error), parent=self.root)
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _mostrar(self, pantallas, error):
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        self._por_iid.clear()
+        self._pantallas = pantallas or []
+        if error:
+            self.lbl_estado.config(text=error, fg="#c0392b")
+            return
+        conectadas = [p for p in self._pantallas if p["conectada"]]
+        self.lbl_estado.config(
+            text=f"{len(conectadas)} pantalla(s) conectada(s).",
+            fg="#1e8449" if conectadas else "#b36b00",
+        )
+        for pantalla in self._pantallas:
+            if not pantalla["conectada"] and pantalla["tipo"] == "otra":
+                continue
+            estado = "conectada" if pantalla["conectada"] else "desconectada"
+            if pantalla["primaria"]:
+                estado += " · primaria"
+            iid = self.tree.insert(
+                "",
+                tk.END,
+                values=(pantalla["nombre"], estado, pantalla["resolucion"], pantalla["tipo"]),
+            )
+            self._por_iid[iid] = pantalla
+        # Seleccionar la primaria o la primera conectada
+        for iid, pantalla in self._por_iid.items():
+            if pantalla.get("primaria") or pantalla.get("conectada"):
+                self.tree.selection_set(iid)
+                break
+
+    def _ejecutar_xrandr(self, args, descripcion, mensaje):
+        if self._ocupado:
+            return
+
+        def trabajo():
+            resultado = _xrandr_args(args)
+            registrar(descripcion, " ".join(args), resultado.returncode == 0)
+            return resultado
+
+        self._set_ocupado(True, mensaje)
+
+        def al_terminar(resultado):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            if resultado.returncode != 0:
+                texto = (resultado.stderr or resultado.stdout or "No se pudo cambiar las pantallas.").strip()
+                messagebox.showerror(
+                    "Pantallas",
+                    texto + "\n\nSi usas Wayland, prueba los ajustes de GNOME.",
+                    parent=self.root,
+                )
+            self.cargar()
+
+        def al_error(error):
+            if not self.root.winfo_exists():
+                return
+            self._set_ocupado(False)
+            messagebox.showerror(
+                "Pantallas",
+                str(error) + "\n\nSi usas Wayland, prueba los ajustes de GNOME.",
+                parent=self.root,
+            )
+
+        en_hilo(self.root, trabajo, al_terminar=al_terminar, al_error=al_error)
+
+    def _detectar(self):
+        if self._ocupado:
+            return
+        conectadas = [p["nombre"] for p in self._pantallas if p["conectada"]]
+        if not conectadas:
+            # Aun así intentar --auto global no existe; refrescar lista
+            self.cargar()
+            return
+        args = []
+        for nombre in conectadas:
+            args.extend(["--output", nombre, "--auto"])
+        self._ejecutar_xrandr(args, "Detectar pantallas", "Detectando pantallas…")
+
+    def _solo_esta(self):
+        if self._ocupado:
+            return
+        elegida = self._seleccion()
+        if not elegida or not elegida["conectada"]:
+            messagebox.showinfo("Pantallas", "Selecciona una pantalla conectada.", parent=self.root)
+            return
+        if not confirmar(
+            f"Se va a dejar solo la pantalla {elegida['nombre']} y apagar las demás.\n\n¿Continuar?",
+            self.root,
+            "Solo Esta Pantalla",
+        ):
+            return
+        args = ["--output", elegida["nombre"], "--auto", "--primary"]
+        for pantalla in self._pantallas:
+            if pantalla["conectada"] and pantalla["nombre"] != elegida["nombre"]:
+                args.extend(["--output", pantalla["nombre"], "--off"])
+        self._ejecutar_xrandr(args, "Solo una pantalla", "Aplicando una sola pantalla…")
+
+    def _extender(self):
+        if self._ocupado:
+            return
+        interna, externa = _elegir_interna_externa(self._pantallas)
+        if not interna or not externa:
+            messagebox.showinfo(
+                "Pantallas",
+                "Hace falta al menos una pantalla interna y otra externa conectadas.",
+                parent=self.root,
+            )
+            return
+        if not confirmar(
+            f"Se va a extender el escritorio:\n\n"
+            f"{interna['nombre']} + {externa['nombre']} a su derecha.\n\n¿Continuar?",
+            self.root,
+            "Extender Pantallas",
+        ):
+            return
+        args = [
+            "--output", interna["nombre"], "--auto", "--primary",
+            "--output", externa["nombre"], "--auto", "--right-of", interna["nombre"],
+        ]
+        self._ejecutar_xrandr(args, "Extender pantallas", "Extendiendo pantallas…")
+
+    def _espejo(self):
+        if self._ocupado:
+            return
+        interna, externa = _elegir_interna_externa(self._pantallas)
+        if not interna or not externa:
+            messagebox.showinfo(
+                "Pantallas",
+                "Hace falta al menos una pantalla interna y otra externa conectadas.",
+                parent=self.root,
+            )
+            return
+        if not confirmar(
+            f"Se va a duplicar (espejo) la imagen en:\n\n"
+            f"{interna['nombre']} y {externa['nombre']}.\n\n¿Continuar?",
+            self.root,
+            "Espejo De Pantallas",
+        ):
+            return
+        args = [
+            "--output", interna["nombre"], "--auto", "--primary",
+            "--output", externa["nombre"], "--auto", "--same-as", interna["nombre"],
+        ]
+        self._ejecutar_xrandr(args, "Espejo de pantallas", "Aplicando espejo…")
+
+    def _abrir_gnome(self):
+        for comando in (["gnome-control-center", "display"], ["gnome-control-center", "displays"]):
+            try:
+                subprocess.Popen(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except OSError:
+                continue
+        messagebox.showinfo(
+            "Pantallas",
+            "No se encontró el configurador de pantallas de GNOME.",
+            parent=self.root,
+        )

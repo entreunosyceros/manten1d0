@@ -52,7 +52,7 @@ from cat_sistema import (
     limpiar_cache,
     abrir_gestor_software,
 )
-from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras, EspacioDiscos, Cortafuegos, SnapFlatpak, Bluetooth, ServiciosFallidos
+from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras, EspacioDiscos, Cortafuegos, SnapFlatpak, Bluetooth, ServiciosFallidos, Sonido, Pantallas
 from tooltip import ToolTip, con_tooltip
 from registro import confirmar, en_hilo, sudo_run, ventana_progreso, mostrar_registro, mostrar_historial_comandos, _widget_vivo
 from avisos import recoger_avisos
@@ -520,6 +520,8 @@ def sistema_cat(self, mensaje_personalizado):
                 ("Salud discos", lambda: SaludDiscos(tk.Toplevel(self.area_central)), "Consulta el estado SMART, temperatura y avisos de los discos"),
                 ("Cortafuegos", lambda: Cortafuegos(tk.Toplevel(self.area_central)), "Activa o desactiva el cortafuegos y reglas frecuentes: SSH, Samba o solo tu red local"),
                 ("Bluetooth", lambda: Bluetooth(tk.Toplevel(self.area_central)), "Lista dispositivos Bluetooth, olvida uno que no conecta o reinicia el servicio (como apagar y encender)"),
+                ("Sonido", lambda: Sonido(tk.Toplevel(self.area_central)), "Reinicia el audio o cambia la salida (auriculares, HDMI) cuando no hay sonido"),
+                ("Pantallas", lambda: Pantallas(tk.Toplevel(self.area_central)), "Detecta monitores o la TV: espejo, escritorio extendido o una sola pantalla"),
                 ("Impresoras", lambda: Impresoras(tk.Toplevel(self.area_central)), "Busca impresoras USB o de la red local y las colas ya instaladas en CUPS"),
             ),
         ),
