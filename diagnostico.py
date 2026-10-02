@@ -1,4 +1,4 @@
-"""Avisos del panel de inicio: actualizaciones, disco, SMART, conexión y temperatura."""
+"""Diagnóstico del equipo para el panel de Inicio (checklist ok / aviso / error)."""
 
 import os
 import re
@@ -30,42 +30,93 @@ def _comando(args, timeout=20):
         return subprocess.CompletedProcess(args, 1, "", str(error))
 
 
-def recoger_avisos():
-    avisos = []
-    avisos.extend(_aviso_conexion())
-    avisos.extend(_aviso_disco())
-    avisos.extend(_aviso_reinicio())
-    avisos.extend(_aviso_actualizaciones())
-    avisos.extend(_aviso_smart())
-    avisos.extend(_aviso_temperatura())
-    if not avisos:
-        avisos.append({
-            "nivel": "ok",
-            "titulo": "Todo en orden",
-            "detalle": (
-                "No hay avisos de disco, reinicio, actualizaciones, SMART, "
-                "conexión ni temperatura."
-            ),
-            "destino": None,
+def analizar_equipo():
+    """Devuelve la checklist completa del equipo (siempre un ítem por comprobación)."""
+    items = []
+    items.extend(_check_conexion())
+    items.extend(_check_disco())
+    items.extend(_check_reinicio())
+    items.extend(_check_actualizaciones())
+    items.extend(_check_smart())
+    items.extend(_check_temperatura())
+    items.extend(_check_servicios_fallidos())
+    items.extend(_check_ufw())
+    return items
+
+
+def listar_unidades_fallidas():
+    """Lista unidades systemd en estado failed. Devuelve (unidades, error_o_None)."""
+    proceso = _comando(
+        ["systemctl", "--failed", "--no-pager", "--plain", "--no-legend"],
+        timeout=40,
+    )
+    if proceso.returncode not in (0, 1):
+        error = (proceso.stderr or proceso.stdout or "No se pudo listar unidades fallidas.").strip()
+        return [], error
+    unidades = []
+    for linea in proceso.stdout.splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("●"):
+            continue
+        partes = linea.split(None, 4)
+        if len(partes) < 4:
+            continue
+        nombre, _load, activo, sub = partes[0], partes[1], partes[2], partes[3]
+        descripcion = partes[4] if len(partes) > 4 else ""
+        unidades.append({
+            "unidad": nombre,
+            "estado": activo,
+            "subestado": sub,
+            "descripcion": descripcion,
         })
-    return avisos
+    unidades.sort(key=lambda u: u["unidad"].lower())
+    return unidades, None
 
 
-def _aviso_conexion():
+def estado_ufw():
+    """Estado del cortafuegos sin pedir sudo: activo, inactivo, no_instalado o desconocido."""
+    if shutil.which("ufw") is None:
+        return "no_instalado"
+    proceso = _comando(["ufw", "status"], timeout=10)
+    if proceso.returncode == 0:
+        texto = (proceso.stdout or "").lower()
+        if "inactive" in texto:
+            return "inactivo"
+        if "active" in texto:
+            return "activo"
+    try:
+        with open("/etc/ufw/ufw.conf", encoding="utf-8", errors="replace") as archivo:
+            for linea in archivo:
+                if linea.strip().upper().startswith("ENABLED="):
+                    valor = linea.split("=", 1)[1].strip().lower()
+                    return "activo" if valor == "yes" else "inactivo"
+    except OSError:
+        pass
+    return "desconocido"
+
+
+def _check_conexion():
     try:
         requests.get("https://www.google.com", timeout=3)
-        return []
+        return [{
+            "nivel": "ok",
+            "titulo": "Internet funcionando",
+            "detalle": "Hay conexión con la red. Pulsa para abrir el asistente de Internet.",
+            "destino": "Internet",
+            "panel": "AsistenteInternet",
+        }]
     except requests.RequestException:
         return [{
             "nivel": "error",
             "titulo": "Sin conexión a Internet",
-            "detalle": "No se pudo contactar con la red. Revisa la categoría Internet.",
+            "detalle": "No se pudo contactar con la red. Pulsa para el asistente de problemas de Internet.",
             "destino": "Internet",
+            "panel": "AsistenteInternet",
         }]
 
 
-def _aviso_disco():
-    avisos = []
+def _check_disco():
+    items = []
     puntos = [("/", "Disco raíz (/)")]
     home = os.path.expanduser("~")
     if os.path.ismount(home) or home != "/":
@@ -83,17 +134,35 @@ def _aviso_disco():
         porcentaje = (uso.used / uso.total) * 100 if uso.total else 0
         if porcentaje >= 90:
             nivel = "error"
+            detalle = _detalle_disco(ruta, uso)
+            panel = "LimpiezaEspacio"
         elif porcentaje >= 80:
             nivel = "aviso"
+            detalle = _detalle_disco(ruta, uso)
+            panel = "LimpiezaEspacio"
         else:
-            continue
-        avisos.append({
+            nivel = "ok"
+            detalle = (
+                f"Libre: {_tamano(uso.free)} de {_tamano(uso.total)}. "
+                "Pulsa para abrir la limpieza de disco."
+            )
+            panel = "LimpiezaEspacio"
+        items.append({
             "nivel": nivel,
             "titulo": f"{etiqueta} al {porcentaje:.0f}%",
-            "detalle": _detalle_disco(ruta, uso),
+            "detalle": detalle,
             "destino": "Sistema",
+            "panel": panel,
         })
-    return avisos
+    if not items:
+        items.append({
+            "nivel": "info",
+            "titulo": "Espacio en disco",
+            "detalle": "No se pudo consultar el uso del disco.",
+            "destino": "Sistema",
+            "panel": "EspacioDiscos",
+        })
+    return items
 
 
 _PISTAS_CARPETA = {
@@ -162,9 +231,14 @@ def _detalle_disco(ruta, uso):
     )
 
 
-def _aviso_reinicio():
+def _check_reinicio():
     if not os.path.isfile("/var/run/reboot-required"):
-        return []
+        return [{
+            "nivel": "ok",
+            "titulo": "No hace falta reiniciar",
+            "detalle": "No hay reinicio pendiente tras actualizaciones.",
+            "destino": None,
+        }]
     detalle = "Una actualización no termina de aplicarse hasta reiniciar."
     paquetes = _paquetes_reinicio()
     if paquetes:
@@ -192,11 +266,11 @@ def _paquetes_reinicio():
         return ""
     texto = ", ".join(nombres[:4])
     if len(nombres) > 4:
-        texto += "…"
+        texto += "..."
     return texto
 
 
-def _aviso_actualizaciones():
+def _check_actualizaciones():
     comprobador = "/usr/lib/update-notifier/apt-check"
     if os.path.exists(comprobador):
         proceso = _comando([comprobador], timeout=30)
@@ -213,25 +287,45 @@ def _aviso_actualizaciones():
                 return [{
                     "nivel": "aviso" if sec == 0 else "error",
                     "titulo": f"{total} actualizaciones pendientes{extra}",
-                    "detalle": "Abre Sistema → Actualizar Sistema para instalarlas.",
+                    "detalle": "Abre Actualizar todo o Sistema → Actualizar Sistema para instalarlas.",
                     "destino": "Sistema",
+                    "panel": "ActualizarTodo",
                 }]
-            return []
+            return [{
+                "nivel": "ok",
+                "titulo": "Sistema actualizado",
+                "detalle": "No hay actualizaciones APT pendientes.",
+                "destino": "Sistema",
+                "panel": "ActualizarTodo",
+            }]
     proceso = _comando(["apt", "list", "--upgradable"], timeout=40)
     lineas = [l for l in (proceso.stdout or "").splitlines() if l and not l.startswith("Listing")]
     if lineas:
         return [{
             "nivel": "aviso",
             "titulo": f"{len(lineas)} actualizaciones pendientes",
-            "detalle": "Abre Sistema → Actualizar Sistema para instalarlas.",
+            "detalle": "Abre Actualizar todo o Sistema → Actualizar Sistema para instalarlas.",
             "destino": "Sistema",
+            "panel": "ActualizarTodo",
         }]
-    return []
+    return [{
+        "nivel": "ok",
+        "titulo": "Sistema actualizado",
+        "detalle": "No hay actualizaciones APT pendientes.",
+        "destino": "Sistema",
+        "panel": "ActualizarTodo",
+    }]
 
 
-def _aviso_smart():
+def _check_smart():
     if shutil.which("smartctl") is None:
-        return []
+        return [{
+            "nivel": "info",
+            "titulo": "SMART no disponible",
+            "detalle": "Instala smartmontools o abre Salud discos para más detalle.",
+            "destino": "Sistema",
+            "panel": "SaludDiscos",
+        }]
     proceso = _comando(["lsblk", "-dn", "-o", "NAME,TYPE"], timeout=10)
     discos = []
     for linea in proceso.stdout.splitlines():
@@ -239,7 +333,13 @@ def _aviso_smart():
         if len(partes) >= 2 and partes[-1] == "disk":
             discos.append(partes[0])
     if not discos:
-        return []
+        return [{
+            "nivel": "info",
+            "titulo": "SMART: sin discos detectados",
+            "detalle": "No se encontraron discos para consultar.",
+            "destino": "Sistema",
+            "panel": "SaludDiscos",
+        }]
 
     contrasena = None
     try:
@@ -251,6 +351,7 @@ def _aviso_smart():
 
     fallos = []
     ilegibles = 0
+    ok = 0
     for disco in discos:
         args = ["smartctl", "-H", f"/dev/{disco}"]
         if contrasena:
@@ -265,6 +366,7 @@ def _aviso_smart():
             resultado = _comando(args, timeout=25)
         texto = (resultado.stdout or "") + (resultado.stderr or "")
         if re.search(r"PASSED|Health Status:\s*OK", texto, re.I):
+            ok += 1
             continue
         if re.search(
             r"self-assessment test result:\s*FAILED|SMART Health Status:\s*(?!OK)|DISK FAILING",
@@ -275,22 +377,29 @@ def _aviso_smart():
         elif "Permission denied" in texto or "unable to" in texto.lower():
             ilegibles += 1
 
-    avisos = []
     if fallos:
-        avisos.append({
+        return [{
             "nivel": "error",
             "titulo": "SMART en fallo: " + ", ".join(fallos),
             "detalle": "Hay discos que no superan el autoinforme SMART. Ábrelos en Salud discos.",
             "destino": "Sistema",
-        })
-    elif ilegibles == len(discos) and discos:
-        avisos.append({
+            "panel": "SaludDiscos",
+        }]
+    if ilegibles == len(discos):
+        return [{
             "nivel": "aviso",
             "titulo": "No se pudo leer el estado SMART",
-            "detalle": "Abre Sistema → Salud discos para consultarlo con permisos sudo.",
+            "detalle": "Abre Salud discos para consultarlo con permisos de administrador.",
             "destino": "Sistema",
-        })
-    return avisos
+            "panel": "SaludDiscos",
+        }]
+    return [{
+        "nivel": "ok",
+        "titulo": "Discos en buen estado (SMART)",
+        "detalle": f"{ok} disco(s) superan el autoinforme. Pulsa para ver el detalle.",
+        "destino": "Sistema",
+        "panel": "SaludDiscos",
+    }]
 
 
 def _lectura_valida(sensor):
@@ -406,10 +515,15 @@ def _leer_ventiladores():
     return resultado
 
 
-def _aviso_temperatura():
+def _check_temperatura():
     datos = _leer_temperatura_cpu()
     if datos is None:
-        return []
+        return [{
+            "nivel": "info",
+            "titulo": "Temperatura no disponible",
+            "detalle": "No hay sensores de temperatura legibles en este equipo.",
+            "destino": "Información",
+        }]
 
     actual = datos["current"]
     high = datos["high"]
@@ -424,8 +538,8 @@ def _aviso_temperatura():
         nivel = "aviso"
         titulo = "El equipo va caliente"
     else:
-        nivel = "info"
-        titulo = "Temperatura del equipo"
+        nivel = "ok"
+        titulo = f"Temperatura normal ({actual:.0f} °C)"
 
     partes = [f"CPU {actual:.0f} °C"]
     if high is not None:
@@ -460,6 +574,71 @@ def _aviso_temperatura():
         "titulo": titulo,
         "detalle": detalle,
         "destino": "Información",
+    }]
+
+
+def _check_servicios_fallidos():
+    unidades, error = listar_unidades_fallidas()
+    if error:
+        return [{
+            "nivel": "aviso",
+            "titulo": "No se pudieron listar servicios fallidos",
+            "detalle": error,
+            "destino": "Sistema",
+            "panel": "RepararUbuntu",
+        }]
+    if not unidades:
+        return [{
+            "nivel": "ok",
+            "titulo": "Ningún servicio ha fallado",
+            "detalle": "systemd no marca unidades en fallo. Pulsa para abrir servicios que fallan.",
+            "destino": "Sistema",
+            "panel": "ServiciosFallidos",
+        }]
+    nombres = ", ".join(u["unidad"] for u in unidades[:4])
+    if len(unidades) > 4:
+        nombres += "..."
+    return [{
+        "nivel": "error",
+        "titulo": f"{len(unidades)} servicio(s) han fallado",
+        "detalle": f"{nombres}. Pulsa para reparaciones guiadas (reiniciar por servicio).",
+        "destino": "Sistema",
+        "panel": "RepararUbuntu",
+    }]
+
+
+def _check_ufw():
+    estado = estado_ufw()
+    if estado == "no_instalado":
+        return [{
+            "nivel": "aviso",
+            "titulo": "Cortafuegos no instalado",
+            "detalle": "ufw no está en el sistema. Puedes instalarlo desde Centro de seguridad.",
+            "destino": "Sistema",
+            "panel": "CentroSeguridad",
+        }]
+    if estado == "activo":
+        return [{
+            "nivel": "ok",
+            "titulo": "Firewall activo",
+            "detalle": "ufw está activado. Pulsa para abrir el Centro de seguridad.",
+            "destino": "Sistema",
+            "panel": "CentroSeguridad",
+        }]
+    if estado == "inactivo":
+        return [{
+            "nivel": "aviso",
+            "titulo": "Firewall desactivado",
+            "detalle": "ufw está instalado pero inactivo. Pulsa para activarlo si lo necesitas.",
+            "destino": "Sistema",
+            "panel": "CentroSeguridad",
+        }]
+    return [{
+        "nivel": "info",
+        "titulo": "Estado del firewall desconocido",
+        "detalle": "No se pudo leer ufw sin privilegios. Abre Centro de seguridad para consultarlo.",
+        "destino": "Sistema",
+        "panel": "CentroSeguridad",
     }]
 
 

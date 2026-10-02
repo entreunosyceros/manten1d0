@@ -295,6 +295,10 @@ def _colores_oscuros_sistema():
 
 def _estilo_ttk(colores):
     estilo = ttk.Style()
+    try:
+        estilo.theme_use("clam")
+    except tk.TclError:
+        pass
     fondo = colores["bg"]
     frente = colores["fg"]
     campo = colores["base"]
@@ -309,6 +313,8 @@ def _estilo_ttk(colores):
     estilo.configure("TEntry", fieldbackground=campo, foreground=texto)
     estilo.configure("TSpinbox", fieldbackground=campo, foreground=texto)
     estilo.configure("TCombobox", fieldbackground=campo, foreground=texto)
+    estilo.configure("TLabelframe", background=fondo, foreground=frente)
+    estilo.configure("TLabelframe.Label", background=fondo, foreground=frente)
     estilo.configure("Treeview", background=campo, fieldbackground=campo, foreground=texto)
     estilo.configure("Treeview.Heading", background=fondo, foreground=frente)
     estilo.map(
@@ -318,6 +324,17 @@ def _estilo_ttk(colores):
     )
     estilo.configure("Horizontal.TProgressbar", background=seleccionado, troughcolor=campo)
     estilo.configure("Vertical.TProgressbar", background=seleccionado, troughcolor=campo)
+
+
+def _es_tipo(widget, *clases):
+    """isinstance seguro: evita TypeError si alguna clase no es un type real."""
+    validos = tuple(c for c in clases if isinstance(c, type))
+    if not validos:
+        return False
+    try:
+        return isinstance(widget, validos)
+    except TypeError:
+        return False
 
 
 def cambiar_tema(ventana, tema):
@@ -338,90 +355,102 @@ def cambiar_tema(ventana, tema):
     _estilo_ttk(colores)
 
     def pintar(widget):
-        for child in widget.winfo_children():
-            if isinstance(child, ttk.Widget):
-                pintar(child)
+        try:
+            hijos = list(widget.winfo_children())
+        except tk.TclError:
+            return
+        for child in hijos:
+            try:
+                _pintar_hijo(child)
+            except (tk.TclError, TypeError):
                 continue
-            if isinstance(child, tk.Label):
-                actual = str(child.cget("bg")).lower()
-                if actual not in _FONDOS_ESTADO:
-                    if getattr(child, "_zona", None) == "barra":
-                        child.config(
-                            background=colores.get("sidebar", fondo),
-                            foreground=frente,
-                        )
-                    else:
-                        child.config(background=fondo, foreground=frente)
-            elif isinstance(child, tk.Button) and getattr(child, "_zona", None) == "barra":
-                activa = getattr(child, "_nav_activa", False)
-                fondo_btn = colores.get("sidebar_activa" if activa else "sidebar", fondo)
-                child.config(
-                    background=fondo_btn,
-                    foreground=frente,
-                    activebackground=fondo_btn,
-                    activeforeground=frente,
-                    relief="flat",
-                    borderwidth=0,
-                    highlightthickness=0,
-                    font=fuente_ui(11, "bold" if activa else "normal"),
-                )
-                if getattr(child, "_hover_aplicado", False):
-                    child._hover_fondo = colores.get("sidebar", fondo)
-                    child._hover_sobre = None
-                    child._hover_dentro = False
-                    child._hover_antes = None
-            elif isinstance(child, (tk.Button, tk.Menubutton)):
-                actual = str(child.cget("bg")).lower()
-                if actual in _FONDOS_ESTADO:
-                    pintar(child)
-                    continue
-                child.config(
-                    background=fondo,
-                    foreground=frente,
-                    activebackground=fondo,
-                    activeforeground=frente,
-                )
-                if getattr(child, "_hover_aplicado", False):
-                    child._hover_fondo = campo
-                    child._hover_sobre = None
-                    child._hover_dentro = False
-                    child._hover_antes = None
-            elif isinstance(child, (tk.Checkbutton, tk.Radiobutton)):
-                child.config(
-                    background=fondo,
-                    foreground=frente,
-                    activebackground=fondo,
-                    activeforeground=frente,
-                    selectcolor=campo,
-                )
-            elif isinstance(child, tk.Listbox):
-                child.config(
-                    background=campo,
-                    foreground=texto,
-                    selectbackground=seleccionado,
-                    selectforeground=seleccionado_fg,
-                )
-            elif isinstance(child, (tk.Entry, tk.Text, tk.Spinbox)):
-                child.config(
-                    background=campo,
-                    foreground=texto,
-                    insertbackground=texto,
-                    selectbackground=seleccionado,
-                    selectforeground=seleccionado_fg,
-                )
-            elif isinstance(child, tk.Menu):
-                child.config(background=fondo, foreground=frente)
-            elif isinstance(child, tk.Canvas):
-                child.config(background=fondo)
-                for item in child.find_all():
-                    if child.type(item) == "line":
-                        child.itemconfig(item, fill=frente)
-            elif isinstance(child, (tk.Frame, tk.Toplevel, tk.Tk)):
-                if getattr(child, "_zona", None) == "barra":
-                    child.config(background=colores.get("sidebar", fondo))
-                else:
-                    child.config(background=fondo)
+
+    def _pintar_hijo(child):
+        # ttk: solo recorrer hijos (el estilo lo pone Style)
+        widget_ttk = getattr(ttk, "Widget", None)
+        if widget_ttk is not None and _es_tipo(child, widget_ttk):
             pintar(child)
+            return
+        if _es_tipo(child, tk.Label):
+            actual = str(child.cget("bg")).lower()
+            if actual not in _FONDOS_ESTADO:
+                if getattr(child, "_zona", None) == "barra":
+                    child.config(
+                        background=colores.get("sidebar", fondo),
+                        foreground=frente,
+                    )
+                else:
+                    child.config(background=fondo, foreground=frente)
+        elif _es_tipo(child, tk.Button) and getattr(child, "_zona", None) == "barra":
+            activa = getattr(child, "_nav_activa", False)
+            fondo_btn = colores.get("sidebar_activa" if activa else "sidebar", fondo)
+            child.config(
+                background=fondo_btn,
+                foreground=frente,
+                activebackground=fondo_btn,
+                activeforeground=frente,
+                relief="flat",
+                borderwidth=0,
+                highlightthickness=0,
+                font=fuente_ui(11, "bold" if activa else "normal"),
+            )
+            if getattr(child, "_hover_aplicado", False):
+                child._hover_fondo = colores.get("sidebar", fondo)
+                child._hover_sobre = None
+                child._hover_dentro = False
+                child._hover_antes = None
+        elif _es_tipo(child, tk.Button, tk.Menubutton):
+            actual = str(child.cget("bg")).lower()
+            if actual in _FONDOS_ESTADO:
+                pintar(child)
+                return
+            child.config(
+                background=fondo,
+                foreground=frente,
+                activebackground=fondo,
+                activeforeground=frente,
+            )
+            if getattr(child, "_hover_aplicado", False):
+                child._hover_fondo = campo
+                child._hover_sobre = None
+                child._hover_dentro = False
+                child._hover_antes = None
+        elif _es_tipo(child, tk.Checkbutton, tk.Radiobutton):
+            child.config(
+                background=fondo,
+                foreground=frente,
+                activebackground=fondo,
+                activeforeground=frente,
+                selectcolor=campo,
+            )
+        elif _es_tipo(child, tk.Listbox):
+            child.config(
+                background=campo,
+                foreground=texto,
+                selectbackground=seleccionado,
+                selectforeground=seleccionado_fg,
+            )
+        elif _es_tipo(child, tk.Entry, tk.Text, tk.Spinbox):
+            child.config(
+                background=campo,
+                foreground=texto,
+                insertbackground=texto,
+                selectbackground=seleccionado,
+                selectforeground=seleccionado_fg,
+            )
+        elif _es_tipo(child, tk.Menu):
+            child.config(background=fondo, foreground=frente)
+        elif _es_tipo(child, tk.Canvas):
+            child.config(background=fondo)
+            for item in child.find_all():
+                if child.type(item) == "line":
+                    child.itemconfig(item, fill=frente)
+        elif _es_tipo(child, tk.Frame, tk.LabelFrame, tk.Toplevel, tk.Tk):
+            if getattr(child, "_zona", None) == "barra":
+                child.config(background=colores.get("sidebar", fondo))
+            else:
+                child.config(background=fondo)
+        pintar(child)
 
     pintar(ventana)
     try:

@@ -1,6 +1,6 @@
 """
 Herramientas extra de la categoría Sistema:
-limpieza de espacio en disco, salud SMART, uso por carpetas, cortafuegos,
+liberar espacio (análisis y limpiezas), salud SMART, uso por carpetas, cortafuegos,
 servicios systemd (incluidos los que fallan), Snap/Flatpak, Bluetooth,
 sonido y pantallas.
 """
@@ -16,12 +16,18 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
 import preferencias
+from diagnostico import listar_unidades_fallidas
 from password import obtener_contrasena
 from tooltip import ToolTip
 from registro import registrar, registrar_comando, confirmar, en_hilo, sudo_run
 
 
 def _centrar_ventana(ventana, ancho, alto):
+    try:
+        from bandeja import preparar_ventana_app
+        preparar_ventana_app(ventana, tamano=64)
+    except Exception:
+        pass
     ventana.update_idletasks()
     x = (ventana.winfo_screenwidth() - ancho) // 2
     y = (ventana.winfo_screenheight() - alto) // 2
@@ -193,48 +199,128 @@ def _comando_sudo(args, contrasena, timeout=180):
         return subprocess.CompletedProcess(args, 1, "", str(error))
 
 
-def _tamano_ruta(ruta):
+def _tamano_ruta(ruta, solo_volumen=False):
+    """Bytes ocupados en disco (no tamano aparente de ficheros dispersos)."""
     if not os.path.exists(ruta):
         return 0
-    proceso = _comando(["du", "-sb", ruta], timeout=90)
+    args = ["du", "-s", "--block-size=1"]
+    if solo_volumen:
+        args.append("-x")
+    args.extend(["--", ruta])
+    proceso = _comando(args, timeout=90)
     if proceso.returncode == 0 and proceso.stdout.strip():
         try:
             return int(proceso.stdout.split()[0])
         except (ValueError, IndexError):
             pass
+    try:
+        dev_raiz = os.stat(ruta).st_dev
+    except OSError:
+        dev_raiz = None
     total = 0
     if os.path.isfile(ruta):
         try:
-            return os.path.getsize(ruta)
+            st = os.stat(ruta)
+            return st.st_blocks * 512 if st.st_blocks else st.st_size
         except OSError:
             return 0
-    for raiz, _dirs, archivos in os.walk(ruta):
+    for raiz, dirs, archivos in os.walk(ruta, topdown=True):
+        if solo_volumen and dev_raiz is not None:
+            try:
+                if os.stat(raiz).st_dev != dev_raiz:
+                    continue
+            except OSError:
+                continue
+            filtradas = []
+            for nombre in dirs:
+                sub = os.path.join(raiz, nombre)
+                try:
+                    if os.stat(sub).st_dev == dev_raiz:
+                        filtradas.append(nombre)
+                except OSError:
+                    continue
+            dirs[:] = filtradas
         for archivo in archivos:
             try:
-                total += os.path.getsize(os.path.join(raiz, archivo))
+                st = os.stat(os.path.join(raiz, archivo))
+                total += st.st_blocks * 512 if st.st_blocks else st.st_size
             except OSError:
                 continue
     return total
 
 
+_IDS_LIMPIEZA_RAPIDA = (
+    "apt_cache",
+    "autoremove",
+    "journal",
+    "thumbnails",
+    "pip",
+    "trash",
+)
+_IDS_LIMPIEZA_PROFUNDA = _IDS_LIMPIEZA_RAPIDA + ("snaps", "kernels")
+
+
 class LimpiezaEspacio:
-    """Analiza y limpia cachés, logs, papelera y revisiones antiguas de snap."""
+    """Liberar espacio: dónde se usa el disco, limpieza rápida y profunda."""
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Limpieza De Espacio En Disco")
-        _centrar_ventana(self.root, 740, 560)
+        self.root.title("Liberar Espacio")
+        self.root.minsize(680, 560)
+        _centrar_ventana(self.root, 780, 640)
         self.items = []
         self.vars = {}
         self._analizando = False
+        self._mapa = []
+
+        tk.Label(
+            self.root,
+            text="Liberar espacio",
+            font=("Arial", 14, "bold"),
+        ).pack(anchor="w", padx=12, pady=(12, 2))
+        tk.Label(
+            self.root,
+            text=(
+                "Mira qué ocupa el disco y recupera espacio con limpieza rápida "
+                "(segura) o profunda. Las casillas permiten elegir a mano."
+            ),
+            wraplength=740,
+            justify=tk.LEFT,
+        ).pack(anchor="w", padx=12, pady=(0, 6))
 
         self.lbl_resumen = tk.Label(
             self.root,
-            text="Calculando uso de disco...",
+            text="Calculando uso de disco…",
             font=("Arial", 11, "bold"),
             justify=tk.LEFT,
+            anchor="w",
         )
-        self.lbl_resumen.pack(anchor="w", padx=12, pady=(12, 6))
+        self.lbl_resumen.pack(anchor="w", padx=12, pady=(0, 2))
+
+        self.lbl_barra = tk.Label(
+            self.root,
+            text="",
+            font=("Courier", 11),
+            justify=tk.LEFT,
+            anchor="w",
+        )
+        self.lbl_barra.pack(anchor="w", padx=12, pady=(0, 4))
+
+        self.lbl_mapa = tk.Label(
+            self.root,
+            text="",
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=740,
+        )
+        self.lbl_mapa.pack(anchor="w", padx=12, pady=(0, 6))
+
+        tk.Label(
+            self.root,
+            text="Espacio que se puede recuperar",
+            font=("Arial", 11, "bold"),
+            anchor="w",
+        ).pack(anchor="w", padx=12)
 
         marco_lista = tk.Frame(self.root)
         marco_lista.pack(fill=tk.BOTH, expand=True, padx=12, pady=6)
@@ -255,22 +341,94 @@ class LimpiezaEspacio:
         self.lbl_estado = tk.Label(self.root, text="", anchor="w")
         self.lbl_estado.pack(fill=tk.X, padx=12)
 
+        perfiles = tk.Frame(self.root)
+        perfiles.pack(pady=(8, 4))
+        self.btn_rapida = tk.Button(
+            perfiles,
+            text="Limpieza rápida",
+            width=16,
+            command=self._limpieza_rapida,
+        )
+        self.btn_rapida.pack(side=tk.LEFT, padx=6)
+        ToolTip(
+            self.btn_rapida,
+            "Marca y limpia solo lo seguro: papelera, caché APT, miniaturas, pip, journal y huérfanos",
+        )
+        self.btn_profunda = tk.Button(
+            perfiles,
+            text="Limpieza profunda",
+            width=16,
+            command=self._limpieza_profunda,
+        )
+        self.btn_profunda.pack(side=tk.LEFT, padx=6)
+        ToolTip(
+            self.btn_profunda,
+            "Incluye lo de la rápida más revisiones Snap antiguas y kernels viejos (pide confirmación extra)",
+        )
+
         marco_botones = tk.Frame(self.root)
-        marco_botones.pack(pady=10)
-
-        self.btn_analizar = tk.Button(marco_botones, text="Volver a analizar", command=self.analizar)
+        marco_botones.pack(pady=(4, 4))
+        self.btn_analizar = tk.Button(marco_botones, text="Analizar", command=self.analizar)
         self.btn_analizar.pack(side=tk.LEFT, padx=6)
-        ToolTip(self.btn_analizar, "Vuelve a calcular el espacio recuperable")
-
-        self.btn_limpiar = tk.Button(marco_botones, text="Limpiar seleccionados", command=self.limpiar)
+        ToolTip(self.btn_analizar, "Vuelve a calcular qué ocupa y cuánto se puede recuperar")
+        self.btn_limpiar = tk.Button(
+            marco_botones,
+            text="Limpiar seleccionados",
+            command=self.limpiar,
+        )
         self.btn_limpiar.pack(side=tk.LEFT, padx=6)
-        ToolTip(self.btn_limpiar, "Elimina solo las categorías marcadas")
+        ToolTip(self.btn_limpiar, "Elimina solo las categorías marcadas en la lista")
+
+        extras = tk.Frame(self.root)
+        extras.pack(pady=(0, 12))
+        btn_carpetas = tk.Button(
+            extras,
+            text="Ver carpetas",
+            width=14,
+            command=self._abrir_espacio_discos,
+        )
+        btn_carpetas.pack(side=tk.LEFT, padx=4)
+        ToolTip(btn_carpetas, "Explora el uso de cada disco y carpeta (solo lectura)")
+        btn_snap = tk.Button(
+            extras,
+            text="Snap y Flatpak",
+            width=14,
+            command=self._abrir_snap_flatpak,
+        )
+        btn_snap.pack(side=tk.LEFT, padx=4)
+        ToolTip(btn_snap, "Lista aplicaciones Snap/Flatpak y el espacio que ocupan")
+        btn_grandes = tk.Button(
+            extras,
+            text="Archivos grandes",
+            width=14,
+            command=self._abrir_archivos_grandes,
+        )
+        btn_grandes.pack(side=tk.LEFT, padx=4)
+        ToolTip(btn_grandes, "Busca ISO, ficheros pesados y descargas antiguas")
+        btn_cerrar = tk.Button(extras, text="Cerrar", width=10, command=self.root.destroy)
+        btn_cerrar.pack(side=tk.LEFT, padx=4)
+        ToolTip(btn_cerrar, "Cierra esta ventana")
 
         _aplicar_tema(self.root)
         self.analizar()
 
+    def _abrir_espacio_discos(self):
+        EspacioDiscos(tk.Toplevel(self.root))
+
+    def _abrir_snap_flatpak(self):
+        SnapFlatpak(tk.Toplevel(self.root))
+
+    def _abrir_archivos_grandes(self):
+        from cat_archivos_extra import ArchivosGrandes
+        ArchivosGrandes(tk.Toplevel(self.root))
+
+    def _barra_uso(self, porcentaje):
+        llenos = max(0, min(20, int(round(porcentaje / 5))))
+        return "█" * llenos + "░" * (20 - llenos)
+
     def _uso_discos(self):
         lineas = []
+        barra = ""
         for punto in ("/", os.path.expanduser("~")):
             try:
                 uso = shutil.disk_usage(punto)
@@ -279,9 +437,37 @@ class LimpiezaEspacio:
                     f"{punto}: {_formato_tamano(uso.used)} / {_formato_tamano(uso.total)} "
                     f"({porcentaje:.0f}% usado, {_formato_tamano(uso.free)} libres)"
                 )
+                if punto == "/" or not barra:
+                    barra = f"{self._barra_uso(porcentaje)}  {porcentaje:.0f}%"
             except OSError:
                 continue
-        return "\n".join(lineas) if lineas else "No se pudo leer el uso de disco."
+        return ("\n".join(lineas) if lineas else "No se pudo leer el uso de disco.", barra)
+
+    def _mapa_ocupacion(self):
+        """Carpetas típicas del usuario que más suelen ocupar (solo lectura)."""
+        home = os.path.expanduser("~")
+        grupos = (
+            ("Documentos", ("Documentos", "Documents")),
+            ("Descargas", ("Descargas", "Downloads")),
+            ("Vídeos", ("Vídeos", "Videos")),
+            ("Imágenes", ("Imágenes", "Pictures")),
+            ("Música", ("Música", "Music")),
+            ("Caché", (".cache",)),
+            ("Papelera", (".local/share/Trash",)),
+            ("Snap", ("snap",)),
+            ("Flatpak", (".var/app",)),
+        )
+        filas = []
+        for etiqueta, nombres in grupos:
+            tamano = 0
+            for nombre in nombres:
+                ruta = os.path.join(home, nombre)
+                if os.path.exists(ruta):
+                    tamano += _tamano_ruta(ruta, solo_volumen=True)
+            if tamano > 0:
+                filas.append((etiqueta, tamano))
+        filas.sort(key=lambda par: par[1], reverse=True)
+        return filas
 
     def _recoger_elementos(self):
         home = os.path.expanduser("~")
@@ -305,6 +491,7 @@ class LimpiezaEspacio:
             "descripcion": "Paquetes .deb descargados que ya no hacen falta para instalar.",
             "tamano": apt,
             "sudo": True,
+            "perfil": "rapida",
         })
 
         proceso_auto = _comando(["apt-get", "--dry-run", "autoremove"], timeout=90)
@@ -326,6 +513,7 @@ class LimpiezaEspacio:
             "descripcion": "Paquetes que ya no son dependencia de ninguno instalado.",
             "tamano": tamano_auto,
             "sudo": True,
+            "perfil": "rapida",
         })
 
         proceso_journal = _comando(["journalctl", "--disk-usage"], timeout=30)
@@ -347,6 +535,7 @@ class LimpiezaEspacio:
             "descripcion": "Se conservarán los registros de los últimos 7 días.",
             "tamano": tamano_journal,
             "sudo": True,
+            "perfil": "rapida",
         })
 
         elementos.append({
@@ -355,6 +544,7 @@ class LimpiezaEspacio:
             "descripcion": "Caché de previsualizaciones en ~/.cache/thumbnails.",
             "tamano": _tamano_ruta(os.path.join(home, ".cache", "thumbnails")),
             "sudo": False,
+            "perfil": "rapida",
         })
 
         elementos.append({
@@ -363,6 +553,7 @@ class LimpiezaEspacio:
             "descripcion": "Ruedas y archivos temporales de pip en ~/.cache/pip.",
             "tamano": _tamano_ruta(os.path.join(home, ".cache", "pip")),
             "sudo": False,
+            "perfil": "rapida",
         })
 
         elementos.append({
@@ -371,6 +562,7 @@ class LimpiezaEspacio:
             "descripcion": "Archivos enviados a la papelera del usuario.",
             "tamano": _tamano_ruta(os.path.join(home, ".local", "share", "Trash")),
             "sudo": False,
+            "perfil": "rapida",
         })
 
         snaps_antiguos = []
@@ -392,6 +584,7 @@ class LimpiezaEspacio:
             "tamano": sum(item[2] for item in snaps_antiguos),
             "sudo": True,
             "extra": snaps_antiguos,
+            "perfil": "profunda",
         })
 
         viejas = _versiones_viejas()
@@ -403,6 +596,7 @@ class LimpiezaEspacio:
             "sudo": True,
             "marcado": False,
             "extra": viejas["paquetes"],
+            "perfil": "profunda",
         })
 
         return elementos
@@ -411,44 +605,81 @@ class LimpiezaEspacio:
         if self._analizando:
             return
         self._analizando = True
-        self.btn_analizar.config(state=tk.DISABLED)
-        self.btn_limpiar.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Analizando espacio recuperable...")
+        for boton in (
+            self.btn_analizar,
+            self.btn_limpiar,
+            self.btn_rapida,
+            self.btn_profunda,
+        ):
+            boton.config(state=tk.DISABLED)
+        self.lbl_estado.config(text="Analizando espacio…")
 
         def trabajador():
             try:
-                resumen = self._uso_discos()
+                resumen, barra = self._uso_discos()
+                mapa = self._mapa_ocupacion()
                 elementos = self._recoger_elementos()
             except Exception as error:
                 self.root.after(0, lambda e=str(error): self._error_analisis(e))
                 return
-            self.root.after(0, lambda r=resumen, el=elementos: self._mostrar_analisis(r, el))
+            self.root.after(
+                0,
+                lambda r=resumen, b=barra, m=mapa, el=elementos: self._mostrar_analisis(r, b, m, el),
+            )
 
         threading.Thread(target=trabajador, daemon=True).start()
 
     def _error_analisis(self, error):
         self._analizando = False
-        self.btn_analizar.config(state=tk.NORMAL)
-        self.btn_limpiar.config(state=tk.NORMAL)
+        for boton in (
+            self.btn_analizar,
+            self.btn_limpiar,
+            self.btn_rapida,
+            self.btn_profunda,
+        ):
+            boton.config(state=tk.NORMAL)
         messagebox.showerror("Error", f"No se pudo analizar el disco:\n{error}", parent=self.root)
 
-    def _mostrar_analisis(self, resumen, elementos):
+    def _mostrar_analisis(self, resumen, barra, mapa, elementos):
         if not self.root.winfo_exists():
             return
         self._analizando = False
         self.items = elementos
+        self._mapa = mapa
         self.lbl_resumen.config(text=resumen)
+        self.lbl_barra.config(text=barra)
+        if mapa:
+            trozos = [f"{nombre} {_formato_tamano(tam)}" for nombre, tam in mapa[:8]]
+            self.lbl_mapa.config(
+                text="En tu carpeta personal: " + " · ".join(trozos),
+            )
+        else:
+            self.lbl_mapa.config(text="No se pudo desglosar el uso de la carpeta personal.")
+
         for hijo in self.frame_items.winfo_children():
             hijo.destroy()
         self.vars = {}
         recuperable = 0
+        recuperable_rapida = 0
         for elemento in elementos:
             recuperable += elemento["tamano"]
+            if elemento["id"] in _IDS_LIMPIEZA_RAPIDA:
+                recuperable_rapida += elemento["tamano"]
             activo = elemento["tamano"] > 0 or bool(elemento.get("extra"))
-            var = tk.BooleanVar(value=bool(elemento.get("marcado", True)) and activo)
+            # Por defecto: rápida marcada; profunda (snaps) marcada si hay tamaño; kernels no
+            if elemento["id"] == "kernels":
+                valor_inicial = False
+            elif elemento.get("perfil") == "profunda":
+                valor_inicial = activo and elemento["tamano"] > 0
+            else:
+                valor_inicial = bool(elemento.get("marcado", True)) and activo
+            var = tk.BooleanVar(value=valor_inicial)
             self.vars[elemento["id"]] = var
+            etiqueta_perfil = ""
+            if elemento.get("perfil") == "profunda":
+                etiqueta_perfil = "  [profunda]"
             texto = (
-                f"{elemento['nombre']}  —  {_formato_tamano(elemento['tamano'])}\n"
+                f"{elemento['nombre']}  —  {_formato_tamano(elemento['tamano'])}{etiqueta_perfil}\n"
                 f"{elemento['descripcion']}"
             )
             casilla = tk.Checkbutton(
@@ -457,36 +688,85 @@ class LimpiezaEspacio:
                 variable=var,
                 justify=tk.LEFT,
                 anchor="w",
-                wraplength=640,
+                wraplength=700,
             )
             if not activo:
                 casilla.config(state=tk.DISABLED)
                 var.set(False)
             casilla.pack(fill=tk.X, pady=4, anchor="w")
-        self.lbl_estado.config(text=f"Espacio potencialmente recuperable: {_formato_tamano(recuperable)}")
-        self.btn_analizar.config(state=tk.NORMAL)
-        self.btn_limpiar.config(state=tk.NORMAL)
+        self.lbl_estado.config(
+            text=(
+                f"Recuperable (rápida ≈ {_formato_tamano(recuperable_rapida)} · "
+                f"todo ≈ {_formato_tamano(recuperable)})"
+            )
+        )
+        for boton in (
+            self.btn_analizar,
+            self.btn_limpiar,
+            self.btn_rapida,
+            self.btn_profunda,
+        ):
+            boton.config(state=tk.NORMAL)
         _aplicar_tema(self.root)
 
-    def limpiar(self):
-        seleccionados = [item for item in self.items if self.vars.get(item["id"]) and self.vars[item["id"]].get()]
+    def _marcar_perfil(self, ids_perfil):
+        for item in self.items:
+            var = self.vars.get(item["id"])
+            if var is None:
+                continue
+            activo = item["tamano"] > 0 or bool(item.get("extra"))
+            var.set(item["id"] in ids_perfil and activo)
+
+    def _limpieza_rapida(self):
+        self._marcar_perfil(_IDS_LIMPIEZA_RAPIDA)
+        self.limpiar(
+            titulo="Limpieza rápida",
+            extra=(
+                "Solo cosas seguras: papelera, cachés, journal (últimos 7 días) "
+                "y paquetes huérfanos.\nNo toca Snap antiguos ni kernels."
+            ),
+        )
+
+    def _limpieza_profunda(self):
+        self._marcar_perfil(_IDS_LIMPIEZA_PROFUNDA)
+        self.limpiar(
+            titulo="Limpieza profunda",
+            extra=(
+                "Incluye revisiones Snap antiguas y, si hay, versiones viejas del núcleo.\n"
+                "Se conserva el kernel en marcha y el anterior. Revisa la lista antes de continuar."
+            ),
+        )
+
+    def limpiar(self, titulo="Confirmar limpieza", extra=None):
+        seleccionados = [
+            item for item in self.items
+            if self.vars.get(item["id"]) and self.vars[item["id"]].get()
+        ]
         if not seleccionados:
-            messagebox.showinfo("Limpieza", "No hay categorías seleccionadas.", parent=self.root)
+            messagebox.showinfo("Liberar espacio", "No hay categorías seleccionadas.", parent=self.root)
             return
         total = sum(item["tamano"] for item in seleccionados)
-        nombres = "\n".join(f"- {item['nombre']}" for item in seleccionados)
-        if not messagebox.askyesno(
-            "Confirmar limpieza",
-            f"Se van a limpiar:\n{nombres}\n\nEstimado: {_formato_tamano(total)}\n\n¿Continuar?",
-            parent=self.root,
-        ):
+        nombres = "\n".join(
+            f"- {item['nombre']} ({_formato_tamano(item['tamano'])})"
+            for item in seleccionados
+        )
+        mensaje = f"Se van a limpiar:\n{nombres}\n\nEstimado: {_formato_tamano(total)}"
+        if extra:
+            mensaje += f"\n\n{extra}"
+        mensaje += "\n\n¿Continuar?"
+        if not messagebox.askyesno(titulo, mensaje, parent=self.root):
             return
 
         necesita_sudo = any(item["sudo"] for item in seleccionados)
         contrasena = obtener_contrasena() if necesita_sudo else None
-        self.btn_analizar.config(state=tk.DISABLED)
-        self.btn_limpiar.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Limpiando...")
+        for boton in (
+            self.btn_analizar,
+            self.btn_limpiar,
+            self.btn_rapida,
+            self.btn_profunda,
+        ):
+            boton.config(state=tk.DISABLED)
+        self.lbl_estado.config(text="Limpiando…")
 
         def trabajador():
             mensajes = []
@@ -551,8 +831,8 @@ class LimpiezaEspacio:
     def _fin_limpieza(self, mensajes):
         if not self.root.winfo_exists():
             return
-        registrar("Limpieza de disco", " | ".join(mensajes), True)
-        messagebox.showinfo("Limpieza", "\n".join(mensajes), parent=self.root)
+        registrar("Liberar espacio", " | ".join(mensajes), True)
+        messagebox.showinfo("Liberar espacio", "\n".join(mensajes), parent=self.root)
         self.analizar()
 
 
@@ -2487,7 +2767,7 @@ def _listar_flatpaks():
             "tipo": "Flatpak",
             "id": app_id,
             "nombre": nombre or app_id,
-            "version": version or "—",
+            "version": version or "",
             "revision": "",
             "instalacion": (instalacion or "system").lower(),
             "tamano": _parsear_tamano_humano(tamano_txt),
@@ -3212,36 +3492,6 @@ class Bluetooth:
 
 
 
-def _listar_unidades_fallidas():
-    """Lista unidades systemd en estado failed."""
-    proceso = _comando(
-        ["systemctl", "--failed", "--no-pager", "--plain", "--no-legend"],
-        timeout=40,
-    )
-    if proceso.returncode not in (0, 1):
-        # systemctl --failed puede devolver 0 con lista vacía
-        error = (proceso.stderr or proceso.stdout or "No se pudo listar unidades fallidas.").strip()
-        return [], error
-    unidades = []
-    for linea in proceso.stdout.splitlines():
-        linea = linea.strip()
-        if not linea or linea.startswith("●"):
-            continue
-        partes = linea.split(None, 4)
-        if len(partes) < 4:
-            continue
-        nombre, _load, activo, sub = partes[0], partes[1], partes[2], partes[3]
-        descripcion = partes[4] if len(partes) > 4 else ""
-        unidades.append({
-            "unidad": nombre,
-            "estado": activo,
-            "subestado": sub,
-            "descripcion": descripcion,
-        })
-    unidades.sort(key=lambda u: u["unidad"].lower())
-    return unidades, None
-
-
 def _log_corto_unidad(unidad):
     """Últimas líneas del journal de una unidad. Prueba sin sudo y con sudo."""
     args = ["journalctl", "-u", unidad, "-n", "40", "--no-pager", "-o", "short-iso"]
@@ -3370,7 +3620,7 @@ class ServiciosFallidos:
         self._set_ocupado(True, "Buscando unidades en fallo…")
 
         def trabajador():
-            return _listar_unidades_fallidas()
+            return listar_unidades_fallidas()
 
         def al_terminar(resultado):
             if not self.root.winfo_exists():

@@ -45,7 +45,6 @@ from cat_sistema import (
     DebInstalador,
     DesinstalarPaquetes,
     Limpieza,
-    MonitorizarSistema,
     Repositorios,
     actualizar_sistema,
     consultaLogs,
@@ -55,13 +54,34 @@ from cat_sistema import (
 from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras, EspacioDiscos, Cortafuegos, SnapFlatpak, Bluetooth, ServiciosFallidos, Sonido, Pantallas
 from tooltip import ToolTip, con_tooltip
 from registro import confirmar, en_hilo, sudo_run, ventana_progreso, mostrar_registro, mostrar_historial_comandos, _widget_vivo
-from avisos import recoger_avisos
+from diagnostico import analizar_equipo
+from reparar import RepararUbuntu
+from actualizar_todo import ActualizarTodo
+from informe_asistencia import InformeAsistencia
+from centro_aplicaciones import CentroAplicaciones
+from centro_seguridad import CentroSeguridad
+from analisis_arranque import AnalisisArranque
+from monitor_recursos import MonitorRecursos
+from asistente_internet import AsistenteInternet
 
 COLORES_AVISO = {
     "error": ("#c0392b", "white"),
     "aviso": ("#e67e22", "white"),
     "ok": ("#1e8449", "white"),
     "info": ("#2471a3", "white"),
+}
+
+PANELES_DIAGNOSTICO = {
+    "ServiciosFallidos": ServiciosFallidos,
+    "SaludDiscos": SaludDiscos,
+    "Cortafuegos": Cortafuegos,
+    "CentroSeguridad": CentroSeguridad,
+    "LimpiezaEspacio": LimpiezaEspacio,
+    "EspacioDiscos": EspacioDiscos,
+    "RepararUbuntu": RepararUbuntu,
+    "ActualizarTodo": ActualizarTodo,
+    "InformeAsistencia": InformeAsistencia,
+    "AsistenteInternet": AsistenteInternet,
 }
 
 RUTA_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
@@ -146,7 +166,7 @@ def inicio_cat(self, mensaje_personalizado=None):
 
     titulo = tk.Label(
         self.area_central,
-        text="Inicio",
+        text="Diagnóstico del equipo",
         font=("Arial", 16, "bold"),
         bg=preferencias.color_fondo(),
         padx=10,
@@ -159,7 +179,11 @@ def inicio_cat(self, mensaje_personalizado=None):
 
     tk.Label(
         self.area_central,
-        text="Estado del equipo. Pulsa un aviso para ir a la categoría relacionada.\nAtajos: Alt+1 Inicio, Alt+2 a Alt+0 el resto de categorías.",
+        text=(
+            "Checklist del estado del equipo. Pulsa un resultado para abrir "
+            "la herramienta relacionada.\n"
+            "Atajos: Alt+1 Inicio, Alt+2 a Alt+0 el resto de categorías."
+        ),
         bg=preferencias.color_fondo(),
         font=("Arial", 10),
         justify=tk.CENTER,
@@ -167,27 +191,154 @@ def inicio_cat(self, mensaje_personalizado=None):
 
     marco_avisos = tk.Frame(self.area_central, bg=preferencias.color_fondo())
     marco_avisos.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
-    etiqueta_carga = tk.Label(marco_avisos, text="Comprobando avisos...", bg=preferencias.color_fondo())
+    etiqueta_carga = tk.Label(marco_avisos, text="Analizando el equipo...", bg=preferencias.color_fondo())
     etiqueta_carga.pack(pady=20)
 
-    def pintar(avisos):
+    def refrescar_checklist():
+        """Vuelve a diagnosticar sin reconstruir toda la pantalla de Inicio."""
         if not _widget_vivo(marco_avisos):
             return
         for hijo in marco_avisos.winfo_children():
             hijo.destroy()
-        for aviso in avisos:
-            fondo, frente = COLORES_AVISO.get(aviso["nivel"], COLORES_AVISO["info"])
-            destino = aviso.get("destino")
-            accion = aviso.get("accion")
-            if accion == "reiniciar":
-                comando = lambda: _reiniciar_equipo(self.root)
-            elif destino:
-                comando = lambda d=destino: self.mostrar_subcategorias(d)
-            else:
-                comando = None
+        tk.Label(
+            marco_avisos,
+            text="Analizando el equipo...",
+            bg=preferencias.color_fondo(),
+        ).pack(pady=20)
+        en_hilo(self.area_central, analizar_equipo, al_terminar=pintar)
+
+    def abrir_toplevel(factory):
+        """Abre un Toplevel y, al cerrarlo, refresca el diagnostico de Inicio."""
+        ventana = tk.Toplevel(self.area_central)
+        factory(ventana)
+
+        def al_destruir(event):
+            if event.widget is not ventana:
+                return
+            if _widget_vivo(marco_avisos):
+                # Diferir un tick: el Destroy aun esta en curso
+                self.area_central.after(50, refrescar_checklist)
+
+        ventana.bind("<Destroy>", al_destruir)
+        return ventana
+
+    def abrir_panel(nombre):
+        clase = PANELES_DIAGNOSTICO.get(nombre)
+        if clase is None:
+            return
+        abrir_toplevel(clase)
+
+    def comando_item(item):
+        accion = item.get("accion")
+        panel = item.get("panel")
+        destino = item.get("destino")
+        if accion == "reiniciar":
+            return lambda: _reiniciar_equipo(self.root)
+        if panel and panel in PANELES_DIAGNOSTICO:
+            return lambda p=panel: abrir_panel(p)
+        if destino:
+            return lambda d=destino: self.mostrar_subcategorias(d)
+        return None
+
+    def pintar(items):
+        if not _widget_vivo(marco_avisos):
+            return
+        for hijo in marco_avisos.winfo_children():
+            hijo.destroy()
+
+        errores = sum(1 for i in items if i.get("nivel") == "error")
+        avisos = sum(1 for i in items if i.get("nivel") == "aviso")
+        if errores or avisos:
+            partes = []
+            if errores:
+                partes.append(f"{errores} problema" + ("s" if errores != 1 else ""))
+            if avisos:
+                partes.append(f"{avisos} aviso" + ("s" if avisos != 1 else ""))
+            texto_resumen = " · ".join(partes)
+            color_resumen = COLORES_AVISO["error"][0] if errores else COLORES_AVISO["aviso"][0]
+        else:
+            texto_resumen = "Sin problemas detectados"
+            color_resumen = COLORES_AVISO["ok"][0]
+        tk.Label(
+            marco_avisos,
+            text=texto_resumen,
+            font=("Arial", 11, "bold"),
+            fg=color_resumen,
+            bg=preferencias.color_fondo(),
+        ).pack(anchor="w", pady=(0, 8))
+
+        marco_botones = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
+        marco_botones.pack(side=tk.BOTTOM, pady=12)
+        fila1 = tk.Frame(marco_botones, bg=preferencias.color_fondo())
+        fila1.pack()
+        fila2 = tk.Frame(marco_botones, bg=preferencias.color_fondo())
+        fila2.pack(pady=(6, 0))
+        con_tooltip(
+            tk.Button(fila1, text="Analizar mi equipo", command=refrescar_checklist),
+            "Vuelve a ejecutar el diagnóstico completo del equipo",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(
+                fila1,
+                text="Reparar Ubuntu",
+                command=lambda: abrir_toplevel(RepararUbuntu),
+            ),
+            "Detecta fallos y ofrece reparaciones guiadas por tarjeta (qué, por qué, riesgos)",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(
+                fila1,
+                text="Liberar espacio",
+                command=lambda: abrir_toplevel(LimpiezaEspacio),
+            ),
+            "Analiza qué ocupa el disco y limpia con perfil rápido o profundo",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(
+                fila2,
+                text="Actualizar todo",
+                command=lambda: abrir_toplevel(ActualizarTodo),
+            ),
+            "Actualiza APT, Snap y Flatpak en un solo flujo",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(
+                fila2,
+                text="Informe de asistencia",
+                command=lambda: abrir_toplevel(InformeAsistencia),
+            ),
+            "Genera un informe del diagnóstico y del equipo para enviárselo a quien te ayude",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(fila2, text="Ver registro de acciones", command=lambda: mostrar_registro(self.root)),
+            "Muestra el historial de acciones realizadas en esta sesión y anteriores",
+        ).pack(side=tk.LEFT, padx=6)
+
+        marco_lista = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
+        marco_lista.pack(fill=tk.BOTH, expand=True)
+        lienzo = tk.Canvas(marco_lista, bg=preferencias.color_fondo(), highlightthickness=0)
+        scroll = ttk.Scrollbar(marco_lista, orient=tk.VERTICAL, command=lienzo.yview)
+        interior = tk.Frame(lienzo, bg=preferencias.color_fondo())
+        interior.bind(
+            "<Configure>",
+            lambda e: lienzo.configure(scrollregion=lienzo.bbox("all")),
+        )
+        ventana_id = lienzo.create_window((0, 0), window=interior, anchor="nw")
+
+        def _ajustar_ancho(event):
+            lienzo.itemconfigure(ventana_id, width=event.width)
+
+        lienzo.bind("<Configure>", _ajustar_ancho)
+        lienzo.configure(yscrollcommand=scroll.set)
+        lienzo.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        for item in items:
+            fondo, frente = COLORES_AVISO.get(item["nivel"], COLORES_AVISO["info"])
+            comando = comando_item(item)
             boton = tk.Button(
-                marco_avisos,
-                text=f"{aviso['titulo']}\n{aviso['detalle']}",
+                interior,
+                text=f"{item['titulo']}\n{item['detalle']}",
                 bg=fondo,
                 fg=frente,
                 justify=tk.LEFT,
@@ -198,25 +349,18 @@ def inicio_cat(self, mensaje_personalizado=None):
                 command=comando,
             )
             boton.pack(fill=tk.X, pady=5)
-            if accion == "reiniciar":
+            if item.get("accion") == "reiniciar":
                 ToolTip(boton, "Reinicia el equipo para terminar de aplicar las actualizaciones")
-            elif destino:
-                ToolTip(boton, "Abre la categoría relacionada con este aviso")
+            elif item.get("panel"):
+                ToolTip(boton, "Abre la herramienta relacionada con este resultado")
+            elif item.get("destino"):
+                ToolTip(boton, "Abre la categoría relacionada con este resultado")
             else:
-                ToolTip(boton, aviso.get("detalle") or "Aviso informativo")
-        marco_botones = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
-        marco_botones.pack(pady=12)
-        con_tooltip(
-            tk.Button(marco_botones, text="Actualizar avisos", command=lambda: inicio_cat(self)),
-            "Vuelve a comprobar avisos de sistema, red y mantenimiento",
-        ).pack(side=tk.LEFT, padx=6)
-        con_tooltip(
-            tk.Button(marco_botones, text="Ver registro de acciones", command=lambda: mostrar_registro(self.root)),
-            "Muestra el historial de acciones realizadas en esta sesión y anteriores",
-        ).pack(side=tk.LEFT, padx=6)
+                ToolTip(boton, item.get("detalle") or "Resultado informativo")
+
         preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
-    en_hilo(self.area_central, recoger_avisos, al_terminar=pintar)
+    en_hilo(self.area_central, analizar_equipo, al_terminar=pintar)
     preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
 
@@ -282,6 +426,14 @@ Steps:
     con_tooltip(
         tk.Button(marco_informe, text="Exportar a .txt", command=self.exportar_informe_sistema),
         "Guarda el informe del sistema en un archivo de texto",
+    ).pack(side=tk.LEFT, padx=6)
+    con_tooltip(
+        tk.Button(
+            marco_informe,
+            text="Informe de asistencia",
+            command=lambda: InformeAsistencia(tk.Toplevel(self.area_central)),
+        ),
+        "Diagnóstico + datos del equipo para enviárselo a quien te ayude",
     ).pack(side=tk.LEFT, padx=6)
     if preferencias.tema_seleccionado != "Claro":
         preferencias.cambiar_tema(marco_informe, preferencias.tema_seleccionado)
@@ -489,6 +641,8 @@ def sistema_cat(self, mensaje_personalizado):
             "Instala, quita y actualiza programas.",
             (
                 ("Actualizar Sistema", lambda: actualizar_sistema(self.root), "Instala todas las actualizaciones disponibles para la versión de tu sistema operativo"),
+                ("Actualizar todo", lambda: ActualizarTodo(tk.Toplevel(self.area_central)), "Actualiza APT, Snap y Flatpak juntos, con el recuento de pendientes"),
+                ("Centro de aplicaciones", lambda: CentroAplicaciones(tk.Toplevel(self.area_central)), "Lista APT, Snap y Flatpak: buscar, abrir, actualizar o desinstalar; muestra las que más ocupan"),
                 ("Limpiar Caché", lambda: limpiar_cache(self.root), "Limpia la caché del sistema operativo"),
                 ("Abrir Gestor Software", abrir_gestor_software, "Instala o desinstala paquetes snap desde el gestor de software de Ubuntu"),
                 ("Instalar .deb", lambda: DebInstalador().ejecutar(self.root), "Selecciona e instala un paquete .deb usando dpkg"),
@@ -500,7 +654,7 @@ def sistema_cat(self, mensaje_personalizado):
             "Espacio",
             "Mira qué ocupa el disco y libera lo que se puede borrar.",
             (
-                ("Limpieza disco", lambda: LimpiezaEspacio(tk.Toplevel(self.area_central)), "Analiza y libera espacio: caché, miniaturas, papelera, snaps y versiones viejas del sistema que ya no se usan"),
+                ("Liberar espacio", lambda: LimpiezaEspacio(tk.Toplevel(self.area_central)), "Analiza qué ocupa el disco y limpia con perfil rápido o profundo: caché, papelera, snaps y kernels viejos"),
                 ("Snap y Flatpak", lambda: SnapFlatpak(tk.Toplevel(self.area_central)), "Lista aplicaciones Snap y Flatpak, el espacio que usan, las actualiza o las quita (van aparte de APT)"),
                 ("Espacio discos", lambda: EspacioDiscos(tk.Toplevel(self.area_central)), "Muestra el espacio ocupado de cada disco y las carpetas que más pesan"),
                 ("Vaciar Papelera", Limpieza.vaciar_papelera, "Vacía la papelera de reciclaje del equipo"),
@@ -513,12 +667,13 @@ def sistema_cat(self, mensaje_personalizado):
             "Procesos, discos, servicios y lo que protege el equipo.",
             (
                 ("Administrar Procesos", lambda: AdministrarProcesos(tk.Toplevel(self.area_central)), "Abre una ventana para administrar los procesos del sistema"),
-                ("Monitorizar", lambda: MonitorizarSistema(tk.Toplevel(self.area_central)).monitorizar_sistema(), "Genera un gráfico de los recursos del sistema en el momento actual"),
+                ("Monitorizar", lambda: MonitorRecursos(tk.Toplevel(self.area_central)), "CPU, RAM, disco y temperatura con barras; procesos ordenables por consumo; Abrir o Finalizar con confirmacion"),
+                ("Reparar Ubuntu", lambda: RepararUbuntu(tk.Toplevel(self.area_central)), "Continúa el diagnóstico: tarjetas por problema (APT, dpkg, cada servicio…) con confirmación guiada"),
                 ("Servicios", lambda: ServiciosSystemd(tk.Toplevel(self.area_central)), "Inicia, detiene, habilita o deshabilita servicios systemd"),
                 ("Servicios que fallan", lambda: ServiciosFallidos(tk.Toplevel(self.area_central)), "Lista unidades systemd en fallo, las reinicia o muestra un log corto"),
                 ("Ver logs", lambda: consultaLogs(tk.Toplevel(self.area_central)), "Consulta los registros más importantes del sistema"),
                 ("Salud discos", lambda: SaludDiscos(tk.Toplevel(self.area_central)), "Consulta el estado SMART, temperatura y avisos de los discos"),
-                ("Cortafuegos", lambda: Cortafuegos(tk.Toplevel(self.area_central)), "Activa o desactiva el cortafuegos y reglas frecuentes: SSH, Samba o solo tu red local"),
+                ("Centro de seguridad", lambda: CentroSeguridad(tk.Toplevel(self.area_central)), "Resumen de firewall, actualizaciones, usuario y puertos abiertos, con explicaciones claras"),
                 ("Bluetooth", lambda: Bluetooth(tk.Toplevel(self.area_central)), "Lista dispositivos Bluetooth, olvida uno que no conecta o reinicia el servicio (como apagar y encender)"),
                 ("Sonido", lambda: Sonido(tk.Toplevel(self.area_central)), "Reinicia el audio o cambia la salida (auriculares, HDMI) cuando no hay sonido"),
                 ("Pantallas", lambda: Pantallas(tk.Toplevel(self.area_central)), "Detecta monitores o la TV: espejo, escritorio extendido o una sola pantalla"),
@@ -530,6 +685,7 @@ def sistema_cat(self, mensaje_personalizado):
             "Qué se abre al iniciar sesión, y acciones que ya habías hecho.",
             (
                 ("Aplicaciones Inicio", lambda: AplicacionesAutostart(tk.Toplevel(self.area_central)), "Añade o elimina aplicaciones que se ejecuten al arrancar el equipo. Permite archivos .desktop"),
+                ("Por que tarda en arrancar?", lambda: AnalisisArranque(tk.Toplevel(self.area_central)), "Muestra tiempos de arranque (firmware, kernel, userspace) y los servicios mas lentos, con explicaciones"),
                 ("Historial comandos", lambda: mostrar_historial_comandos(self.root), "Repite limpiezas y otras acciones ya ejecutadas desde la aplicación"),
             ),
         ),
@@ -592,6 +748,14 @@ def internet_cat(self, mensaje_personalizado, entry_url=None):
 
     def reiniciar_tarjeta_seleccionada():
         reiniciar_tarjeta_red(seleccion_interfaz.get(), parent=self.root)
+
+    _boton_categoria(
+        bloque,
+        colores,
+        "Tengo problemas con Internet",
+        lambda: AsistenteInternet(tk.Toplevel(self.root)),
+        "Analiza adaptador, router, DNS, Internet, latencia y perdida; propone una solucion",
+    ).pack(anchor="w", pady=6, fill="x")
 
     _boton_categoria(
         bloque,
@@ -679,7 +843,7 @@ def red_local_cat(self, mensaje_personalizado):
                 hijo.destroy()
             tk.Label(
                 zona_resultados,
-                text="Quién hay en tu red (Wi‑Fi o cable):",
+                text="Quién hay en tu red (Wi-Fi o cable):",
                 font=preferencias.fuente_ui(12, "bold"),
                 bg=fondo,
                 fg=texto,
@@ -725,7 +889,7 @@ def red_local_cat(self, mensaje_personalizado):
         "En la red de casa",
         "Quién hay en la red, si el router responde, compartir carpeta o encender un PC.",
         (
-            ("Quién hay en la red", buscar_equipos_red_local, "Lista quién hay en tu red (Wi‑Fi o cable); no hace falta entrar en el router"),
+            ("Quién hay en la red", buscar_equipos_red_local, "Lista quién hay en tu red (Wi-Fi o cable); no hace falta entrar en el router"),
             ("¿Responde el router?", lambda: RouterCasa(tk.Toplevel(self.area_central)), "Hace ping al router de casa y puede abrir su página de configuración"),
             ("Compartir carpeta", lambda: CompartirCarpeta(tk.Toplevel(self.area_central)), "Comparte una carpeta para que otro equipo de casa la vea"),
             ("Encender un PC", lambda: EncenderPC(tk.Toplevel(self.area_central)), "Enciende un equipo apagado de la red si su placa lo permite"),
@@ -954,24 +1118,7 @@ def archivos_cat(self, mensaje_personalizado):
 
 
 def perfil_cat(self, mensaje_personalizado):
-    """
-    Función perfil_cat.
-
-    Esta función se encarga de mostrar la pantalla de perfil de usuario en la interfaz gráfica.
-
-    Args:
-        self: La instancia de la clase que llama a la función.
-        mensaje_personalizado (str): Mensaje opcional que se mostrará en la interfaz.
-
-    Returns:
-        No retorna ningún valor.
-
-    Steps:
-        - Oculta el contenedor de texto y destruye los elementos en el área central.
-        - Crea un label con el mensaje personalizado o uno predeterminado si no se proporciona.
-        - Crea un botón para modificar el perfil de usuario.
-        - Aplica el tema seleccionado a los elementos creados.
-    """
+    """Perfil de usuario con desplazamiento vertical y carpeta personal."""
 
     def aplicar_tema(widget):
         """Aplica el tema seleccionado a un widget si el tema no es 'Claro'."""
@@ -982,50 +1129,37 @@ def perfil_cat(self, mensaje_personalizado):
             else:
                 widget.config(bg=preferencias.color_fondo())
 
-    def crear_label_y_linea(mensaje, font_size, padding):
-        """Crea un label con un mensaje y dibuja una línea horizontal."""
-        label = tk.Label(self.area_central, text=mensaje, font=("Arial", font_size, "bold"), bg=preferencias.color_fondo(), padx=10, pady=padding)
-        aplicar_tema(label)
-        label.pack()
-        
-        canvas_linea = tk.Canvas(self.area_central, width=500, height=2, bg=preferencias.color_fondo(), highlightthickness=0)
-        canvas_linea.create_line(0, 1, 500, 1, fill="black")
-        aplicar_tema(canvas_linea)
-        canvas_linea.pack(pady=10)
-
     def abrir_ventana_perfil():
         ventana_perfil = tk.Toplevel(self.area_central)
         PerfilUsuario(ventana_perfil)
         aplicar_tema(ventana_perfil)
 
-    # Limpiar el área central
-    self.contenedor_texto.pack_forget()
-    for widget in self.area_central.winfo_children():
-        widget.destroy()
-
-    # Crear el label con el mensaje personalizado o un mensaje predeterminado
-    if mensaje_personalizado:
-        crear_label_y_linea(mensaje_personalizado, 16, 20)
-    else:
-        crear_label_y_linea("PERFIL USUARIO", 12, 0)
-
-    fondo = preferencias.color_fondo()
-    panel_perfil, foto_perfil = crear_panel_perfil(self.area_central, fondo=fondo)
+    colores, interior = _preparar_categoria(
+        self,
+        "Perfil Usuario",
+        mensaje_personalizado
+        or "Tu cuenta, idioma, region y carpeta personal.",
+    )
+    fondo = colores["bg"]
+    panel_perfil, foto_perfil = crear_panel_perfil(interior, fondo=fondo)
     self._perfil_foto_tk = foto_perfil
     aplicar_tema(panel_perfil)
-    panel_perfil.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+    panel_perfil.pack(fill=tk.BOTH, expand=True, padx=12, pady=4)
 
-    # Crear un frame para los botones relacionados con el perfil de usuario
-    frame_botones_perfil = tk.Frame(self.area_central, bg=preferencias.color_fondo())
+    frame_botones_perfil = tk.Frame(interior, bg=fondo)
     aplicar_tema(frame_botones_perfil)
-    frame_botones_perfil.pack(pady=(0, 12))
+    frame_botones_perfil.pack(pady=(4, 16), padx=12, anchor="w")
 
-    # Crear el botón para abrir la ventana desde la que modificar el perfil de usuario
-    boton_perfil = tk.Button(frame_botones_perfil, text="Modificar Perfil Usuario", width=24, command=abrir_ventana_perfil)
+    boton_perfil = tk.Button(
+        frame_botones_perfil,
+        text="Modificar Perfil Usuario",
+        width=24,
+        command=abrir_ventana_perfil,
+    )
     aplicar_tema(boton_perfil)
     boton_perfil.pack(side=tk.LEFT, padx=5, pady=5)
-    ToolTip(boton_perfil, "Modifica el nombre, la imagen o la contraseña")
-    
+    ToolTip(boton_perfil, "Modifica el nombre visible o la imagen de perfil")
+
 def notas_cat(self, mensaje_personalizado):
     """
     Función notas_cat.

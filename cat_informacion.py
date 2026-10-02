@@ -406,11 +406,16 @@ class Informacion:
     @staticmethod
     def obtener_tiempo_arranque():
         """Tiempo de arranque según systemd-analyze (kernel + userspace)."""
-        salida = Informacion._comando_texto(["systemd-analyze"], timeout=10)
-        if not salida.strip():
-            return "No disponible"
-        primera = salida.strip().splitlines()[0].strip()
-        return primera or "No disponible"
+        try:
+            from analisis_arranque import texto_tiempo_arranque_informacion
+
+            return texto_tiempo_arranque_informacion()
+        except Exception:
+            salida = Informacion._comando_texto(["systemd-analyze"], timeout=10)
+            if not salida.strip():
+                return "No disponible"
+            primera = salida.strip().splitlines()[0].strip()
+            return primera or "No disponible"
 
 
 
@@ -571,6 +576,34 @@ class Informacion:
         return info_memoria
 
     @staticmethod
+    def obtener_temperatura_cpu():
+        """Temperatura CPU con el mismo sensor que el diagnostico de Inicio."""
+        try:
+            from diagnostico import _leer_temperatura_cpu
+
+            datos = _leer_temperatura_cpu()
+        except Exception:
+            return None
+        if not datos or datos.get("current") is None:
+            return None
+        return datos
+
+    @staticmethod
+    def texto_temperatura_cpu():
+        datos = Informacion.obtener_temperatura_cpu()
+        if not datos:
+            return "No disponible"
+        actual = datos["current"]
+        partes = [f"{actual:.0f} °C"]
+        high = datos.get("high")
+        critical = datos.get("critical")
+        if high is not None:
+            partes.append(f"(aviso del sensor a {high:.0f} °C)")
+        elif critical is not None:
+            partes.append(f"(critico del sensor a {critical:.0f} °C)")
+        return " ".join(partes)
+
+    @staticmethod
     def obtener_informacion_completa():
         info = {}
         # Obtener la información del sistema
@@ -600,5 +633,6 @@ class Informacion:
         info["Zona Horaria"] = Informacion.get_zona_horaria()
         info["Información del Procesador"] = Informacion.obtener_informacion_procesador()
         info["Información de la Memoria"] = Informacion.obtener_informacion_memoria()
+        info["Temperatura CPU"] = Informacion.texto_temperatura_cpu()
         return info
 

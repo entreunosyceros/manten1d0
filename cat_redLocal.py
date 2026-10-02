@@ -771,7 +771,7 @@ class RouterCasa:
             if not self._gateway:
                 self.lbl_estado.config(text="No se encontró el router.", fg="#c0392b")
                 self.lbl_detalle.config(
-                    text="Este equipo no tiene una ruta por defecto. Revisa el cable o el Wi‑Fi."
+                    text="Este equipo no tiene una ruta por defecto. Revisa el cable o el Wi-Fi."
                 )
                 self.btn_abrir.config(state=tk.DISABLED)
                 return
@@ -783,7 +783,7 @@ class RouterCasa:
                     fg="#1e8449",
                 )
                 self.lbl_detalle.config(
-                    text="Si quieres cambiar Wi‑Fi o contraseña del router, abre su página (botón de abajo)."
+                    text="Si quieres cambiar Wi-Fi o contraseña del router, abre su página (botón de abajo)."
                 )
                 self.btn_abrir.config(state=tk.NORMAL)
             else:
@@ -792,7 +792,7 @@ class RouterCasa:
                     fg="#c0392b",
                 )
                 self.lbl_detalle.config(
-                    text="Prueba otro cable, reinicia el router o revisa la Wi‑Fi. "
+                    text="Prueba otro cable, reinicia el router o revisa la Wi-Fi. "
                     "Aun así puedes intentar abrir su página por si el ping está bloqueado."
                 )
                 self.btn_abrir.config(state=tk.NORMAL)

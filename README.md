@@ -4,7 +4,7 @@
 ------------------------------------------------------------------
 * Manten1d0: sistema de mantenimiento básico y otras herramientas para Ubuntu.
 * Creado con: Python 3.10.12
-* Versión actual del programa: **0.7.0**
+* Versión actual del programa: **0.8.0**
 * Probado en: Ubuntu 22.04
 ------------------------------------------------------------------
 Esto es un pequeño programa para realizar el mantenimiento básico de Ubuntu, y que así no me toquen las narices todos los días cuando quiere instalar un programa, llega una actualización del sistema y cosas por el estilo.
@@ -13,21 +13,28 @@ La contraseña de sudo se pide una vez al iniciar y se guarda cifrada. Las accio
 
 Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
-## Características de la versión 0.7.0
+## Características de la versión 0.8.0
 
 ### Inicio
 
 - Barra lateral plana: la categoría activa queda marcada; los botones responden al pasar el ratón (también en tema oscuro).
 - Logo `Manten1do.png` a tamaño del área disponible.
-- Avisos de estado: Internet, disco raíz o carpeta personal (>80 % / >90 %, con las tres carpetas que más ocupan y qué se puede borrar sin miedo), reinicio pendiente tras una actualización, actualizaciones APT (incluidas las de seguridad), problemas SMART si `smartctl` está disponible, y **temperatura de CPU** (y ventiladores si hay sensores; aviso si va caliente).
-- Pulsar un aviso abre la categoría relacionada. El de reinicio pide confirmación y reinicia el equipo. Se puede actualizar la lista o abrir el registro de acciones.
+- **Diagnóstico del equipo**: checklist completa (ok / aviso / error) con Internet, espacio en disco, reinicio pendiente, actualizaciones APT, SMART, temperatura, servicios systemd fallidos y cortafuegos (ufw). Resumen arriba: problemas y avisos, o «Sin problemas detectados».
+- Pulsar un resultado abre la herramienta concreta (limpieza de disco, Salud discos, servicios que fallan, cortafuegos…) o la categoría relacionada. El de reinicio pide confirmación y reinicia el equipo.
+- **Analizar mi equipo** vuelve a ejecutar el diagnóstico. **Reparar Ubuntu** continúa el diagnóstico con **tarjetas por problema** (dependencias APT, paquetes a medias, cada servicio fallido, red, CUPS): cada reparación explica qué hará, por qué y los riesgos; también hay otras reparaciones útiles (audio, caché APT…). **Liberar espacio** muestra qué ocupa la carpeta personal, el espacio recuperable y perfiles de limpieza rápida o profunda. **Actualizar todo** cuenta e instala pendientes de APT, Snap y Flatpak. **Informe de asistencia** genera un texto del diagnóstico y del equipo para enviarlo a quien ayude. Se puede abrir el registro de acciones.
 
 ### Perfil de usuario
 
 <img width="799" height="765" alt="perfil-usuario" src="https://github.com/user-attachments/assets/2f672cdc-e862-41e7-b748-4f8aa8179e6b" />
 
-- Muestra los datos actuales que se pueden modificar: foto, usuario, nombre visible, carpeta personal, intérprete y grupos.
-- El formulario de edición llega ya rellenado. Se puede cambiar nombre visible, imagen y contraseña (el login no se altera desde aquí).
+- Muestra lo esencial: foto, usuario, nombre visible, **configuración regional** (país, formatos, moneda, zona horaria) e **idioma de la interfaz**. La pestaña tiene desplazamiento vertical si hace falta.
+- **Mi carpeta personal**: ruta del home, abrir en el explorador, ver espacio utilizado (Documentos, Descargas, Vídeos…) o ir a **Liberar espacio**.
+- **Aplicaciones predeterminadas**: navegador, correo, visor de imágenes, vídeo y editor de texto; se puede restaurar lo del sistema.
+- **Carpetas personales**: Documentos, Descargas, Música, Imágenes, Vídeos y Escritorio (solo consulta; Abrir en el explorador).
+- **Contraseña**: último cambio y estado; **Cambiar contraseña** con indicador de fuerza, checklist, mostrar/ocultar y aviso de no reutilizar claves. Caducidad solo si el sistema la tiene configurada.
+- **Idioma de la interfaz**: elige entre los idiomas instalados; se aplica al iniciar la próxima sesión.
+- **Configuración regional**: resumen de formatos; para cambiarlos se abre el panel de Ubuntu.
+- El formulario de edición permite cambiar nombre visible e imagen (el login no se altera desde aquí).
 
 ### Información
 
@@ -35,13 +42,13 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 - Informe del equipo: sistema, Ubuntu, escritorio, tiempo encendido, **tiempo de arranque (`systemd-analyze`)**, red, DNS, CPU, memoria y zona horaria.
 - Gráfica **AMD, Intel y NVIDIA** (lspci/sysfs; `nvidia-smi` solo si hay NVIDIA).
-- Copiar el informe al portapapeles o exportarlo a un `.txt`.
+- Copiar el informe al portapapeles, exportarlo a un `.txt` o abrir el **Informe de asistencia** (diagnóstico + equipo para enviarlo a quien ayude).
 
 ### Sistema
 
 <img width="796" height="771" alt="sisetma" src="https://github.com/user-attachments/assets/c20c5012-dfce-44f4-a327-807bcd7a06ca" />
 
-- Las acciones están agrupadas en **poner al día**, **espacio**, **el equipo** y **al arrancar**: actualizar, limpiar caché APT, gestor de software, autostart, borrar archivos, vaciar papelera, procesos, duplicados, repositorios/PPA, monitorización, instalar `.deb`, desinstalar paquetes, logs, limpieza de disco (incluye **versiones viejas del sistema que ya no se usan**; esa casilla llega desmarcada y conserva la versión en marcha y la anterior), **Snap y Flatpak** (listar con el espacio que ocupan, actualizar o desinstalar; van aparte de APT; si falta Flatpak se puede instalar desde ahí), SMART, servicios systemd, **servicios que fallan** (listar, reiniciar o ver un log corto), **espacio de cada disco** (carpetas que más ocupan), **Bluetooth**, **Sonido** (reiniciar PipeWire/PulseAudio o cambiar de salida), **Pantallas** (espejo / extendido / una sola con xrandr o ajustes GNOME) y **cortafuegos** (activar o desactivar ufw; reglas frecuentes: SSH, Samba o solo la red local; si falta ufw se puede instalar desde ahí).
+- Las acciones están agrupadas en **poner al día**, **espacio**, **el equipo** y **al arrancar**: actualizar, **Actualizar todo** (APT + Snap + Flatpak), **Centro de aplicaciones** (lista unificada APT de escritorio + Snap + Flatpak: buscar, abrir, actualizar o desinstalar; ranking por espacio; atajos a Instalar .deb y la tienda), limpiar caché APT, gestor de software, autostart, **analisis de arranque** (systemd-analyze: tiempos por fase y servicios mas lentos con explicaciones), borrar archivos, vaciar papelera, procesos, duplicados, repositorios/PPA, **monitorización simplificada** (barras CPU/RAM/disco, procesos ordenables, Abrir/Finalizar), instalar `.deb`, desinstalar paquetes, logs, **Liberar espacio** (qué ocupa el disco, limpieza rápida o profunda: caché APT, journal, miniaturas, papelera, Snap antiguos y kernels viejos; atajos a Ver carpetas, Snap/Flatpak y Archivos grandes), **Snap y Flatpak** (listar con el espacio que ocupan, actualizar o desinstalar; van aparte de APT; si falta Flatpak se puede instalar desde ahí), SMART, servicios systemd, **servicios que fallan** (listar, reiniciar o ver un log corto), **Reparar Ubuntu** (evolución del diagnóstico: tarjeta por problema APT/dpkg/servicio/red/CUPS con confirmación qué/por qué/riesgos), **espacio de cada disco** (carpetas que más ocupan), **Bluetooth**, **Sonido** (reiniciar PipeWire/PulseAudio o cambiar de salida), **Pantallas** (espejo / extendido / una sola con xrandr o ajustes GNOME) y **Centro de seguridad** (checklist de firewall, actualizaciones, usuario y puertos en escucha con explicaciones; desde ahí se abre el cortafuegos ufw con reglas SSH/Samba/red local, Actualizar todo, o desactivar servicios conocidos).
 - **Historial de comandos**: vuelve a lanzar limpiezas y acciones ya ejecutadas, con confirmación.
 - **Impresoras**: busca equipos USB o de la red local, lista las colas de CUPS, página de prueba y abre la configuración del sistema.
 
@@ -62,6 +69,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 - Acciones agrupadas en **conexión**, **ajustes de red** y **herramientas**.
 - Reiniciar interfaz, ping, escaneo de puertos, **puerto desde Internet** (aviso de riesgos; escucha local + comprobación en el navegador), test de velocidad, diagnóstico (traceroute/netstat) y **nivel de ruido** (SNR Wi-Fi, jitter y pérdida de paquetes).
+- **Tengo problemas con Internet**: checklist automática (adaptador, router, DNS, Internet, latencia, pérdida) con solución recomendada aplicable (p. ej. DNS Cloudflare o reiniciar NetworkManager).
 - **Wi-Fi** con nmcli (listar, conectar, desconectar; la clave no se guarda en el registro).
 - **DNS**: router (DHCP), Cloudflare `1.1.1.1` o Google `8.8.8.8`.
 - **Editor de `/etc/hosts`** con validación y copia `.bak` al guardar.
@@ -98,7 +106,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Ayuda y menús
 
-- Menú **Ayuda**: documentación de todas las opciones y ventana Acerca de (versión 0.7.0).
+- Menú **Ayuda**: documentación de todas las opciones y ventana Acerca de (versión 0.8.0).
 - Archivo: terminal, abrir URL, salir.
 - Preferencias: tema claro, o el tema oscuro del sistema (GTK), paleta más suave, tamaño de texto, actualizaciones, repositorio GitHub, registro de acciones (con opción de **vaciarlo** sin tocar el historial de comandos repetibles) y atajos **Alt+1 … Alt+0**.
 
@@ -128,7 +136,7 @@ bash packaging/build-deb.sh
 En una terminal (`Ctrl+Alt+T`):
 
 ```
-sudo apt install -f ./manten1d0_0.7.0_all.deb
+sudo apt install -f ./manten1d0_0.8.0_all.deb
 ```
 
 o, como indica el nombre corto:

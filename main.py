@@ -49,24 +49,44 @@ from dependencias import instalar_dependencias, resumen_dependencias_faltantes
 from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, internet_cat, navegadores_cat, perfil_cat, red_local_cat, sistema_cat, notas_cat, inicio_cat
 import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
 from registro import mostrar_registro
-from bandeja import BandejaSistema, preparar_ventana_app, CLASE_VENTANA
+from bandeja import BandejaSistema, preparar_ventana_app, instalar_icono_en_toplevels, CLASE_VENTANA
 from cat_vpn import vpn_en_uso
 from tooltip import ToolTip
 
 
+from password import limpiar_archivos_configuracion, obtener_contrasena
+from dependencias import instalar_dependencias, resumen_dependencias_faltantes
+from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, internet_cat, navegadores_cat, perfil_cat, red_local_cat, sistema_cat, notas_cat, inicio_cat
+import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
+from registro import mostrar_registro
+from bandeja import BandejaSistema, preparar_ventana_app, instalar_icono_en_toplevels, CLASE_VENTANA
+from cat_vpn import vpn_en_uso
+from tooltip import ToolTip
+import dialogo_estilo as estilo
+
+
 def instalar_dependencias_con_progreso(parent):
     progress_window = tk.Toplevel(parent)
-    progress_window.title("Instalando Dependencias")
-    progress_window.geometry("360x110")
-    progress_window.resizable(False, False)
+    cuerpo = estilo.preparar_dialogo(
+        progress_window,
+        "Manten1d0 - Instalando dependencias",
+        "INSTALANDO DEPENDENCIAS",
+        460,
+        220,
+        topmost=True,
+    )
     progress_window.transient(parent)
     progress_window.grab_set()
 
-    progress_label = tk.Label(progress_window, text="Instalando dependencias...")
-    progress_label.pack(pady=5)
+    estilo.etiqueta_titulo(cuerpo, "Instalando lo necesario").pack(anchor="w")
+    progress_label = estilo.etiqueta_texto(
+        cuerpo,
+        "Puede tardar un poco segun lo que falte...",
+    )
+    progress_label.pack(anchor="w", pady=(6, 10))
 
-    progress_bar = ttk.Progressbar(progress_window, length=280, mode="determinate")
-    progress_bar.pack(pady=5)
+    progress_bar = ttk.Progressbar(cuerpo, length=400, mode="determinate")
+    progress_bar.pack(fill=tk.X, pady=4)
     progress_bar["value"] = 0
     progress_bar["maximum"] = 100
 
@@ -106,15 +126,26 @@ def main():
 
     root = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
     preparar_ventana_app(root)
-    root.title("Comprobando Dependencias")
-    root.resizable(False, False)
+    instalar_icono_en_toplevels()
 
-    progress_bar = ttk.Progressbar(root, orient="horizontal", length=200, mode="indeterminate")
-    progress_bar.pack(pady=20)
+    cuerpo = estilo.preparar_dialogo(
+        root,
+        "Manten1d0 - Comprobando dependencias",
+        "COMPROBANDO DEPENDENCIAS",
+        460,
+        220,
+        topmost=True,
+    )
+    estilo.etiqueta_titulo(cuerpo, "Revisando el equipo").pack(anchor="w")
+    label = estilo.etiqueta_texto(
+        cuerpo,
+        "Comprobando que esten instalados los programas y librerias necesarios...",
+    )
+    label.pack(anchor="w", pady=(6, 12))
+
+    progress_bar = ttk.Progressbar(cuerpo, orient="horizontal", length=400, mode="indeterminate")
+    progress_bar.pack(fill=tk.X, pady=4)
     progress_bar.start()
-
-    label = tk.Label(root, text="Comprobando dependencias...")
-    label.pack()
 
     root.after(200, lambda: verificar_dependencias_con_progreso(root, progress_bar, label))
     root.mainloop()
@@ -128,45 +159,72 @@ def verificar_dependencias_con_progreso(root, progress_bar, label):
             bloques.append("Sistema:\n- " + "\n- ".join(faltan_sistema))
         if faltan_pip:
             bloques.append("Python:\n- " + "\n- ".join(faltan_pip))
-        mensaje = (
-            "Faltan dependencias imprescindibles:\n\n"
-            + "\n\n".join(bloques)
-            + "\n\n¿Quieres instalarlas ahora?"
+        detalle = "\n\n".join(bloques)
+        instalar = estilo.dialogo_mensaje(
+            root,
+            "Manten1d0 - Dependencias",
+            "FALTAN DEPENDENCIAS",
+            "Hay componentes imprescindibles sin instalar",
+            detalle + "\n\n¿Quieres instalarlos ahora?",
+            botones=(("Instalar ahora", True), ("Cancelar", False)),
+            color_franja=estilo.FRANJA_AVISO,
+            ancho=480,
+            alto=360,
         )
-        if messagebox.askyesno("Instalación de dependencias", mensaje):
+        if instalar:
             ok, error = instalar_dependencias_con_progreso(root)
             if not ok:
-                messagebox.showerror(
-                    "Error de instalación",
-                    error or "No se pudieron instalar las dependencias.",
+                estilo.dialogo_mensaje(
+                    root,
+                    "Manten1d0 - Error",
+                    "ERROR DE INSTALACION",
+                    "No se pudieron instalar las dependencias",
+                    error or "Se produjo un error desconocido.",
+                    botones=(("Cerrar", True),),
+                    color_franja=estilo.FRANJA_ERROR,
+                    ancho=480,
+                    alto=300,
                 )
                 root.destroy()
                 return
             verificar_dependencias_con_progreso(root, progress_bar, label)
         else:
-            messagebox.showinfo(
-                "Información",
-                "El programa no puede iniciar sin todas las dependencias instaladas.",
+            estilo.dialogo_mensaje(
+                root,
+                "Manten1d0 - Dependencias",
+                "NO SE PUEDE INICIAR",
+                "Faltan dependencias imprescindibles",
+                "El programa no puede iniciar sin instalar lo que falta.",
+                botones=(("Cerrar", True),),
+                color_franja=estilo.FRANJA_AVISO,
             )
             root.destroy()
     else:
         close_progress(root, progress_bar, label)
 
-def close_progress(root, progress_bar, label):
-    progress_bar.stop()
-    progress_bar.destroy()
-    label.destroy()
 
-    # Mostrar mensaje de dependencias instaladas
-    messagebox.showinfo(
-        "Información",
-        "¡Todas las dependencias están instaladas! Haz clic en OK para iniciar el programa...",
+def close_progress(root, progress_bar, label):
+    try:
+        progress_bar.stop()
+    except tk.TclError:
+        pass
+
+    estilo.dialogo_mensaje(
+        root,
+        "Manten1d0 - Listo",
+        "TODO LISTO",
+        "Todas las dependencias estan instaladas",
+        "Haz clic en Continuar para abrir Manten1d0.",
+        botones=(("Continuar", True),),
+        color_franja=estilo.FRANJA_OK,
+        ancho=460,
+        alto=240,
     )
-    # Cerrar la ventana de progreso
     root.destroy()
     # Crear la ventana principal
     main_window = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
     preparar_ventana_app(main_window)
+    instalar_icono_en_toplevels()
     VentanaPrincipal(main_window)
     main_window.mainloop()
 
@@ -551,14 +609,6 @@ class VentanaPrincipal:
 
     # Función para mostrar la información del sistema dentro de la categoría información. Toma los datos de información.py
     def mostrar_informacion_sistema(self):
-        def obtener_temperatura_cpu():
-            try:
-                with open("/sys/class/thermal/thermal_zone0/temp", "r") as file:
-                    temperatura_miligrados = int(file.read().strip())
-                    return temperatura_miligrados / 1000.0
-            except FileNotFoundError:
-                return None
-
         # Obtener la información del sistema utilizando la clase Informacion
         info_completa = Informacion.obtener_informacion_completa()
         usuario = info_completa["Usuario"]
@@ -579,9 +629,7 @@ class VentanaPrincipal:
         zona_horaria = info_completa["Zona Horaria"]
         procesador = Informacion.obtener_informacion_procesador()
         memoria = Informacion.obtener_informacion_memoria()
-
-        # Obtener la temperatura del procesador
-        temperatura_cpu = obtener_temperatura_cpu()
+        temperatura_cpu = info_completa.get("Temperatura CPU", Informacion.texto_temperatura_cpu())
 
         # Crear el texto con la información del sistema
         texto_info = [
@@ -599,10 +647,7 @@ class VentanaPrincipal:
             ("DNS Local:", dns_local),
             ("DNS Público:", dns_publico),
             ("Zona Horaria:", zona_horaria),
-            (
-                "Temperatura CPU:",
-                f"{temperatura_cpu} °C" if temperatura_cpu is not None else "No disponible",
-            ),
+            ("Temperatura CPU:", temperatura_cpu),
             ("-" * 110, ""),
         ]
 

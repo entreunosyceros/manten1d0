@@ -12,7 +12,7 @@
 
 ## Área afectada
 
-- [ ] Inicio / avisos
+- [ ] Inicio / diagnóstico
 - [ ] Sistema (limpiezas, SMART, servicios, impresoras, .deb)
 - [ ] Archivos
 - [ ] Internet / Wi-Fi / DNS / ruido

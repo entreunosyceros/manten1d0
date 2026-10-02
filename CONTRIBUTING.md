@@ -59,7 +59,15 @@ python3 -m compileall -q .
 | `tooltip.py` | Tooltips (desaparecen al salir el ratón) |
 | `bandeja.py` | Icono de bandeja (proceso Qt aparte) |
 | `preferencias.py` | Tema claro/oscuro y tamaño de texto |
-| `avisos.py` | Avisos de Inicio (disco, APT, SMART, Internet, temperatura) |
+| `diagnostico.py` | Diagnóstico de Inicio (checklist: disco, APT, SMART, Internet, temperatura, servicios, ufw) |
+| `reparar.py` | Reparar Ubuntu: tarjetas por problema + repair_apt/dpkg/network/audio/cups |
+| `actualizar_todo.py` | Actualizar APT + Snap + Flatpak en un flujo |
+| `centro_aplicaciones.py` | Centro de aplicaciones (APT escritorio + Snap + Flatpak) |
+| `centro_seguridad.py` | Centro de seguridad (firewall, APT, usuario, puertos) |
+| `analisis_arranque.py` | Analisis de arranque (systemd-analyze, blame, explicaciones) |
+| `monitor_recursos.py` | Monitor del sistema (CPU/RAM/disco, procesos, Abrir/Finalizar) |
+| `asistente_internet.py` | Asistente de problemas de Internet (checklist + soluciones) |
+| `informe_asistencia.py` | Informe de diagnóstico + equipo para exportar |
 | `documentacion.py` / `about.py` | Ayuda y Acerca de |
 | `actualizaciones.py` | Búsqueda de versiones en GitHub Releases |
 | `cat_sistema.py`, `cat_sistema_extra.py` | Sistema: limpiezas, SMART, servicios, impresoras… |

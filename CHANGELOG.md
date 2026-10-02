@@ -1,8 +1,15 @@
 # Historial de versiones
 
-Cambios de Manten1d0 anteriores a la [versión 0.7.0](README.md).
+Cambios de Manten1d0 anteriores a la [versión 0.8.0](README.md).
 
 ------------------------------------------------------------------
+
+## Versión 0.7.0
+
+- Inicio: avisos de disco, reinicio, APT, SMART, temperatura; indicador VPN en la barra lateral.
+- Sistema: Snap/Flatpak, Bluetooth, servicios que fallan, sonido, pantallas, reglas frecuentes de ufw.
+- Internet / red local: puerto desde Internet, ¿responde el router?, quién hay en la red.
+- Tema oscuro corregido en títulos de paneles (p. ej. Diagnóstico Red).
 
 ## Versión 0.6.0
 

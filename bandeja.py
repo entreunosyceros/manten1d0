@@ -13,9 +13,66 @@ RUTA_ICONO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do
 RUTA_ESTE = os.path.abspath(__file__)
 CLASE_VENTANA = "Manten1d0"
 
+# Referencias vivas a PhotoImage (Tk las pierde si no se guardan).
+_ICONOS_FOTO = []
+_ICONO_PARCHE_TOPLEVEL = False
+
+
+def _imagen_icono_ventana():
+    """
+    Icono simple para barras de título: engranaje + llave, sin logos de terceros
+    (ni remolino Debian, ni círculo Ubuntu, ni texto del cartel).
+    """
+    import math
+    from PIL import Image, ImageDraw
+
+    lado = 128
+    imagen = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(imagen)
+
+    # Fondo redondeado azul
+    margen = 6
+    draw.rounded_rectangle(
+        (margen, margen, lado - margen, lado - margen),
+        radius=28,
+        fill=(30, 80, 140, 255),
+    )
+
+    cx = cy = lado // 2
+    # Anillo tipo engranaje (sin espiral)
+    r_ext, r_int = 46, 30
+    draw.ellipse(
+        (cx - r_ext, cy - r_ext, cx + r_ext, cy + r_ext),
+        outline=(220, 235, 255, 255),
+        width=7,
+    )
+    # Dientes simples del engranaje
+    for angulo in range(0, 360, 45):
+        rad = math.radians(angulo)
+        x1 = cx + int((r_ext - 2) * math.cos(rad))
+        y1 = cy + int((r_ext - 2) * math.sin(rad))
+        x2 = cx + int((r_ext + 10) * math.cos(rad))
+        y2 = cy + int((r_ext + 10) * math.sin(rad))
+        draw.line((x1, y1, x2, y2), fill=(220, 235, 255, 255), width=8)
+
+    draw.ellipse(
+        (cx - r_int, cy - r_int, cx + r_int, cy + r_int),
+        fill=(30, 80, 140, 255),
+    )
+
+    # Llave inglesa simplificada (blanco)
+    draw.rectangle((cx - 5, cy - 28, cx + 5, cy + 22), fill=(255, 255, 255, 255))
+    draw.ellipse((cx - 14, cy - 36, cx + 14, cy - 8), outline=(255, 255, 255, 255), width=5)
+    draw.ellipse((cx - 7, cy - 29, cx + 7, cy - 15), fill=(30, 80, 140, 255))
+    draw.polygon(
+        [(cx - 12, cy + 18), (cx + 12, cy + 18), (cx + 8, cy + 32), (cx - 8, cy + 32)],
+        fill=(255, 255, 255, 255),
+    )
+    return imagen
+
 
 def preparar_ventana_app(ventana, tamano=128):
-    """Clase WM e icono para que el dock de Ubuntu muestre el logo."""
+    """Clase WM e icono limpio para barras de título y dock."""
     try:
         ventana.tk.call("wm", "class", ".", CLASE_VENTANA, CLASE_VENTANA)
     except Exception:
@@ -28,13 +85,40 @@ def preparar_ventana_app(ventana, tamano=128):
     except ImportError:
         return
     try:
-        imagen = Image.open(RUTA_ICONO)
-        imagen.thumbnail((tamano, tamano), Image.LANCZOS)
-        foto = ImageTk.PhotoImage(imagen)
-        ventana.iconphoto(True, foto)
-        ventana._icono_manten1d0 = foto
+        emblema = _imagen_icono_ventana()
+        fotos = []
+        for lado in (16, 32, 48, 64, max(64, int(tamano))):
+            copia = emblema.copy()
+            copia.thumbnail((lado, lado), Image.LANCZOS)
+            foto = ImageTk.PhotoImage(copia, master=ventana)
+            fotos.append(foto)
+        # Varios tamaños: el gestor de ventanas elige el adecuado
+        ventana.iconphoto(True, *fotos)
+        ventana._icono_manten1d0 = fotos
+        _ICONOS_FOTO.extend(fotos)
     except Exception:
         return
+
+
+def instalar_icono_en_toplevels():
+    """Hace que todo tk.Toplevel nuevo lleve el mismo icono (evita iconos por defecto raros)."""
+    global _ICONO_PARCHE_TOPLEVEL
+    if _ICONO_PARCHE_TOPLEVEL:
+        return
+    import tkinter as tk
+
+    original = tk.Toplevel
+
+    def toplevel_con_icono(*args, **kwargs):
+        ventana = original(*args, **kwargs)
+        try:
+            preparar_ventana_app(ventana, tamano=64)
+        except Exception:
+            pass
+        return ventana
+
+    tk.Toplevel = toplevel_con_icono
+    _ICONO_PARCHE_TOPLEVEL = True
 
 
 CATEGORIAS = (
@@ -70,13 +154,10 @@ def _crear_icono_qt():
         return QIcon(pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
     try:
-        imagen = Image.open(RUTA_ICONO).convert("RGBA")
+        emblema = _imagen_icono_ventana()
     except OSError:
         return None
-    lado = max(imagen.size)
-    fondo = Image.new("RGBA", (lado, lado), (0, 0, 0, 0))
-    fondo.paste(imagen, ((lado - imagen.width) // 2, (lado - imagen.height) // 2), imagen)
-    fondo = fondo.resize((64, 64), Image.LANCZOS)
+    fondo = emblema.resize((64, 64), Image.LANCZOS)
     buffer = io.BytesIO()
     fondo.save(buffer, format="PNG")
     pixmap = QPixmap()

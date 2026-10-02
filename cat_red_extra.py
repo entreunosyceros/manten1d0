@@ -68,6 +68,83 @@ def _nmcli(args, timeout=30):
         return subprocess.CompletedProcess(["nmcli", *args], 1, "", str(error))
 
 
+def conexiones_nm_activas():
+    """Lista conexiones NetworkManager activas (sin loopback/bridge)."""
+    resultado = _nmcli(["-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"])
+    conexiones = []
+    for linea in (resultado.stdout or "").splitlines():
+        partes = linea.split(":")
+        if len(partes) < 4:
+            continue
+        nombre, uuid, tipo, dispositivo = partes[0], partes[1], partes[2], partes[3]
+        if tipo in ("loopback", "bridge"):
+            continue
+        conexiones.append({
+            "nombre": nombre,
+            "uuid": uuid,
+            "tipo": tipo,
+            "dispositivo": dispositivo,
+        })
+    return conexiones
+
+
+def conexion_nm_activa():
+    """Primera conexión NetworkManager usable, o None."""
+    lista = conexiones_nm_activas()
+    return lista[0] if lista else None
+
+
+def aplicar_dns_preajuste(etiqueta, parent=None, confirmar_antes=True, solo_confirmar=False):
+    """
+    Aplica un preajuste DNS_PREAJUSTES a la conexion NM activa.
+    Devuelve (ok, mensaje). Si confirmar_antes y el usuario cancela: (False, cancelado).
+    Si solo_confirmar=True, valida y pide confirmacion pero no ejecuta nmcli.
+    """
+    conexion = conexion_nm_activa()
+    if not conexion:
+        return False, "No hay conexion NetworkManager activa para cambiar el DNS."
+    preajuste = next((item for item in DNS_PREAJUSTES if item[0] == etiqueta), None)
+    if not preajuste:
+        return False, f"Preajuste DNS desconocido: {etiqueta}"
+    _nombre, clave, servidores = preajuste
+    if clave == "router":
+        mensaje = f"Usar el DNS automatico del router en «{conexion['nombre']}»?"
+        args = [
+            "connection", "modify", conexion["uuid"],
+            "ipv4.ignore-auto-dns", "no", "ipv4.dns", "",
+        ]
+    else:
+        mensaje = f"Cambiar el DNS de «{conexion['nombre']}» a {servidores}?"
+        args = [
+            "connection", "modify", conexion["uuid"],
+            "ipv4.ignore-auto-dns", "yes", "ipv4.dns", servidores,
+        ]
+    if confirmar_antes:
+        if not confirmar(mensaje, parent, "DNS"):
+            return False, "cancelado"
+    if solo_confirmar:
+        return True, "confirmado"
+    modificado = sudo_run(
+        ["nmcli", *args],
+        f"DNS {etiqueta}",
+        parent=None,
+        confirmar_accion=False,
+    )
+    if modificado is None or modificado.returncode != 0:
+        detalle = (modificado.stderr if modificado is not None else "cancelado")[:300]
+        return False, detalle or "No se pudo modificar el DNS."
+    reactivado = sudo_run(
+        ["nmcli", "connection", "up", conexion["uuid"]],
+        f"Reactivar {conexion['nombre']}",
+        parent=None,
+        confirmar_accion=False,
+    )
+    if reactivado is None or reactivado.returncode != 0:
+        detalle = (reactivado.stderr if reactivado is not None else "cancelado")[:300]
+        return False, detalle or "DNS cambiado pero no se pudo reactivar la conexion."
+    return True, f"DNS cambiado: {etiqueta}."
+
+
 class RedesWifi:
     """Lista y conecta redes Wi-Fi con nmcli."""
 
@@ -405,19 +482,11 @@ class SelectorDns:
         self.cargar()
 
     def cargar(self):
-        resultado = _nmcli(["-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"])
-        conexiones = []
-        for linea in resultado.stdout.splitlines():
-            partes = linea.split(":")
-            if len(partes) < 4:
-                continue
-            nombre, uuid, tipo, dispositivo = partes[0], partes[1], partes[2], partes[3]
-            if tipo in ("loopback", "bridge"):
-                continue
-            conexiones.append({"nombre": nombre, "uuid": uuid, "tipo": tipo, "dispositivo": dispositivo})
-        self.conexiones = conexiones
-        self.combo["values"] = [f"{c['nombre']} ({c['dispositivo'] or c['tipo']})" for c in conexiones]
-        if conexiones:
+        self.conexiones = conexiones_nm_activas()
+        self.combo["values"] = [
+            f"{c['nombre']} ({c['dispositivo'] or c['tipo']})" for c in self.conexiones
+        ]
+        if self.conexiones:
             self.combo.current(0)
         self._mostrar_dns()
 
@@ -437,41 +506,24 @@ class SelectorDns:
         self.actual.config(text=f"DNS actual: {valores}")
 
     def aplicar(self, etiqueta):
-        conexion = self._seleccion()
-        if not conexion:
-            messagebox.showinfo("DNS", "No hay conexión activa para cambiar el DNS.", parent=self.root)
-            return
-        preajuste = next((item for item in DNS_PREAJUSTES if item[0] == etiqueta), None)
-        if not preajuste:
-            return
-        _nombre, clave, servidores = preajuste
-        if clave == "router":
-            mensaje = f"¿Usar el DNS automático del router en «{conexion['nombre']}»?"
-            args = ["connection", "modify", conexion["uuid"], "ipv4.ignore-auto-dns", "no", "ipv4.dns", ""]
-        else:
-            mensaje = f"¿Cambiar el DNS de «{conexion['nombre']}» a {servidores}?"
-            args = ["connection", "modify", conexion["uuid"], "ipv4.ignore-auto-dns", "yes", "ipv4.dns", servidores]
-        if not confirmar(mensaje, self.root, "DNS"):
+        # Confirmar en el hilo de la UI; el trabajo con sudo va en segundo plano.
+        ok_previo, mensaje_previo = aplicar_dns_preajuste(
+            etiqueta, parent=self.root, confirmar_antes=True, solo_confirmar=True
+        )
+        if not ok_previo:
+            if mensaje_previo != "cancelado":
+                messagebox.showinfo("DNS", mensaje_previo, parent=self.root)
             return
 
         def trabajo():
-            modificado = sudo_run(["nmcli", *args], f"DNS {etiqueta}", parent=None, confirmar_accion=False)
-            if modificado is None or modificado.returncode != 0:
-                return modificado
-            return sudo_run(
-                ["nmcli", "connection", "up", conexion["uuid"]],
-                f"Reactivar {conexion['nombre']}",
-                parent=None,
-                confirmar_accion=False,
-            )
+            return aplicar_dns_preajuste(etiqueta, parent=None, confirmar_antes=False)
 
         def terminar(resultado):
-            ok = resultado is not None and resultado.returncode == 0
+            ok, mensaje = resultado
             if ok:
-                messagebox.showinfo("DNS", f"DNS cambiado: {etiqueta}.", parent=self.root)
+                messagebox.showinfo("DNS", mensaje, parent=self.root)
             else:
-                detalle = (resultado.stderr if resultado is not None else "cancelado")[:300]
-                messagebox.showerror("DNS", f"No se pudo cambiar el DNS:\n{detalle}", parent=self.root)
+                messagebox.showerror("DNS", f"No se pudo cambiar el DNS:\n{mensaje}", parent=self.root)
             self.cargar()
 
         en_hilo(self.root, trabajo, al_terminar=terminar)

@@ -41,6 +41,7 @@ import sys
 from tooltip import ToolTip
 import subprocess
 import base64
+import dialogo_estilo as estilo
 
 # Contraseña cifrada en la carpeta de datos del usuario (escribible también con el .deb)
 _DIR_DATOS = os.path.join(os.path.expanduser("~"), ".local", "share", "Manten1d0")
@@ -81,6 +82,123 @@ def descifrar_contrasena(contra_cifrada, clave):
     cipher_suite = Fernet(clave)
     return cipher_suite.decrypt(contra_cifrada).decode()
 
+
+def _pedir_contrasena_interactiva():
+    """Dialogo llamativo para pedir la contraseña de usuario (sudo)."""
+    resultado = {"valor": None}
+    raiz_propia = False
+    padre = getattr(tk, "_default_root", None)
+    if padre is None:
+        padre = tk.Tk()
+        padre.withdraw()
+        raiz_propia = True
+
+    win = tk.Toplevel(padre)
+    cuerpo = estilo.preparar_dialogo(
+        win,
+        "Manten1d0 - Contrasena requerida",
+        "CONTRASENA REQUERIDA",
+        460,
+        340,
+        topmost=True,
+    )
+
+    estilo.etiqueta_titulo(cuerpo, "Escribe aqui la contraseña de tu usuario").pack(anchor="w")
+    estilo.etiqueta_texto(
+        cuerpo,
+        "Manten1d0 la necesita para tareas de administrador "
+        "(actualizar, reparar, limpiar, etc.). "
+        "Se guarda cifrada solo en esta sesion.",
+    ).pack(anchor="w", pady=(6, 12))
+
+    marco_entrada = tk.LabelFrame(
+        cuerpo,
+        text=" Contraseña de usuario ",
+        bg=estilo.BG,
+        fg=estilo.TITULO,
+        font=("Arial", 10, "bold"),
+        padx=10,
+        pady=8,
+    )
+    marco_entrada.pack(fill=tk.X)
+
+    var_clave = tk.StringVar()
+    entrada = tk.Entry(
+        marco_entrada,
+        textvariable=var_clave,
+        show="*",
+        font=("Arial", 14),
+        width=28,
+        relief=tk.SOLID,
+        borderwidth=2,
+        highlightthickness=2,
+        highlightbackground=estilo.FRANJA,
+        highlightcolor=estilo.BOTON_BG_ACTIVO,
+    )
+    entrada.pack(fill=tk.X, pady=(2, 6))
+
+    visible = {"si": False}
+
+    def alternar_ver():
+        visible["si"] = not visible["si"]
+        entrada.config(show="" if visible["si"] else "*")
+        btn_ver.config(
+            text="Ocultar contraseña" if visible["si"] else "Mostrar contraseña"
+        )
+
+    btn_ver = tk.Button(
+        marco_entrada,
+        text="Mostrar contraseña",
+        command=alternar_ver,
+        width=18,
+    )
+    btn_ver.pack(anchor="w")
+    ToolTip(btn_ver, "Muestra u oculta lo escrito para evitar errores")
+
+    def aceptar(_evento=None):
+        resultado["valor"] = var_clave.get()
+        win.destroy()
+
+    def cancelar():
+        resultado["valor"] = None
+        win.destroy()
+
+    fila = tk.Frame(cuerpo, bg=estilo.BG)
+    fila.pack(fill=tk.X, pady=(16, 4))
+    estilo.boton_primario(fila, "Continuar", aceptar).pack(side=tk.LEFT, padx=(0, 8))
+    estilo.boton_secundario(fila, "Cancelar", cancelar).pack(side=tk.LEFT)
+
+    entrada.bind("<Return>", aceptar)
+    win.protocol("WM_DELETE_WINDOW", cancelar)
+
+    try:
+        win.grab_set()
+    except tk.TclError:
+        pass
+    win.after(50, entrada.focus_set)
+    win.wait_window()
+
+    # Si creamos la raiz solo para este dialogo, la dejamos retirada
+    # para que messagebox pueda usarla; se destruye al salir de obtener_contrasena.
+    if raiz_propia:
+        try:
+            padre.withdraw()
+            padre._manten1d0_temp = True
+        except tk.TclError:
+            pass
+
+    return resultado["valor"]
+
+
+def _cerrar_raiz_temporal():
+    raiz = getattr(tk, "_default_root", None)
+    if raiz is not None and getattr(raiz, "_manten1d0_temp", False):
+        try:
+            raiz.destroy()
+        except tk.TclError:
+            pass
+
+
 def obtener_contrasena():
     contrasena_verificada = False
 
@@ -92,24 +210,34 @@ def obtener_contrasena():
             contrasena = descifrar_contrasena(contrasena_cifrada, cargar_clave(CLAVE_ARCHIVO))
             if verificar_contrasena_sudo(contrasena):
                 contrasena_verificada = True
+                _cerrar_raiz_temporal()
                 return contrasena
 
-        # Solicitar la contraseña al usuario
-        contrasena = tk.simpledialog.askstring("Contraseña", "Por favor, escrite tu contraseña de usuario:", show='*')
+        # Solicitar la contraseña al usuario (dialogo propio, mas visible)
+        contrasena = _pedir_contrasena_interactiva()
         if contrasena is None:
             limpiar_archivos_configuracion()
+            _cerrar_raiz_temporal()
             sys.exit()
         elif contrasena.strip() == "":
             limpiar_archivos_configuracion()
-            messagebox.showwarning("Contraseña requerida", "Debes ingresar una contraseña.")
+            messagebox.showwarning(
+                "Contrasena requerida",
+                "Debes escribir tu contraseña de usuario para continuar.",
+            )
         else:
             if verificar_contrasena_sudo(contrasena):
                 contrasena_verificada = True
                 almacenar_contrasena(contrasena)
+                _cerrar_raiz_temporal()
                 return contrasena
             else:
                 limpiar_archivos_configuracion()
-                messagebox.showerror("Contraseña Inválida", "Se necesita una contraseña válida para utilizar sudo.")
+                messagebox.showerror(
+                    "Contrasena no valida",
+                    "La contraseña no es correcta o no permite usar sudo.\n"
+                    "Vuelve a intentarlo.",
+                )
 
 # Función para eliminar los archivos de configuración
 def limpiar_archivos_configuracion():
