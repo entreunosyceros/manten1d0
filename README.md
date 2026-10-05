@@ -60,6 +60,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 <p align="center">
 <img width="1919" height="1007" alt="archivos" src="https://github.com/user-attachments/assets/aa974275-d1b8-4c89-86d1-ecabb9ac5010" />  
 </p>
+
 - Las acciones están agrupadas en **copias**, **proteger**, **organizar** y **comprobar y liberar**.
 - **Copiar a un USB**: Documentos o el escritorio, en una carpeta con la fecha en el nombre. Si el USB no está abierto, se monta; si no cabe, avisa y no copia. La restauración de un `.gz` antiguo sigue disponible. Cifrado/descifrado, búsqueda y renombrado masivo.
 - **Permisos y propietario** (chmod/chown, también recursivo).
