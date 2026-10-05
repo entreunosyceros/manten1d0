@@ -99,8 +99,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 ### Navegadores
 
 <p align="center">
-<img width="1920" height="1012" alt="navegadores" src="https://github.com/user-attachments/assets/6e11a7c7-de90-4d5f-a90d-c43946ff78b2" />
-
+<img width="1920" height="1011" alt="navegadores" src="https://github.com/user-attachments/assets/308421ec-3889-45da-8da0-33c001044062" />
 
 </p>
 
