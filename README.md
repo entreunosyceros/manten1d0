@@ -1,11 +1,13 @@
 ## Manten1d0: Mantenimiento básico de Ubuntu
-<img width="798" height="766" alt="inicio" src="https://github.com/user-attachments/assets/09b50f34-0c50-40df-b053-d955fa474287" />
+<p align="center">
+<img width="1431" height="1099" alt="Manten1do" src="https://github.com/user-attachments/assets/d014f1ba-1fe3-438e-a31c-dc61c12798e0" />
+</p>
 
 ------------------------------------------------------------------
 * Manten1d0: sistema de mantenimiento básico y otras herramientas para Ubuntu.
 * Creado con: Python 3.10.12
 * Versión actual del programa: **0.8.1**
-* Probado en: Ubuntu 22.04
+* Probado en: Ubuntu 24.04
 ------------------------------------------------------------------
 Esto es un pequeño programa para realizar el mantenimiento básico de Ubuntu, y que así no me toquen las narices todos los días cuando quiere instalar un programa, llega una actualización del sistema y cosas por el estilo.
 
@@ -17,25 +19,37 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Inicio
 
+<p align="center">
+<img width="1919" height="1010" alt="interfaz-inicio" src="https://github.com/user-attachments/assets/40e4f4b7-d232-4b1b-8c3a-1fc503a4b1fc" />
+</p>
+
 - **¿Qué problema tienes?**: asistente técnico por síntoma. Eliges Internet, sonido, impresora, pantalla, lentitud, espacio, instalación, actualizaciones, Bluetooth o arranque lento; Manten1d0 hace el diagnóstico concreto y propone la herramienta o reparación adecuada.
 - Diagnóstico del equipo (checklist completa), **Reparar Ubuntu**, **Liberar espacio**, **Actualizar todo**, **Informe de asistencia** y registro de acciones.
 - Diálogos de arranque (contraseña y dependencias) con el mismo estilo visible.
 
 ### Perfil de usuario
 
+<p align="center">
+<img width="1919" height="1010" alt="perfil-usuario" src="https://github.com/user-attachments/assets/46c1c86f-2287-434e-a3be-f323c843772d" /> 
+</p>
+
 - Carpeta personal con espacio utilizado y enlace a Liberar espacio; aplicaciones predeterminadas; carpetas XDG (solo consulta); contraseña con fuerza y estado; idioma y región.
 
 ### Información
 
-<img width="800" height="765" alt="info-sistema" src="https://github.com/user-attachments/assets/7a648d60-306e-42d4-9fb6-bc292403bb20" />
+<p align="center">
+<img width="1922" height="1011" alt="informacion-SO" src="https://github.com/user-attachments/assets/8b1e7952-4d6f-445b-90c3-fb092c4e5051" />
+  
+</p>
 
 - Informe del equipo: sistema, Ubuntu, escritorio, tiempo encendido, **tiempo de arranque (`systemd-analyze`)**, red, DNS, CPU, memoria y zona horaria.
 - Gráfica **AMD, Intel y NVIDIA** (lspci/sysfs; `nvidia-smi` solo si hay NVIDIA).
 - Copiar el informe al portapapeles, exportarlo a un `.txt` o abrir el **Informe de asistencia** (diagnóstico + equipo para enviarlo a quien ayude).
 
 ### Sistema
-
-<img width="796" height="771" alt="sisetma" src="https://github.com/user-attachments/assets/c20c5012-dfce-44f4-a327-807bcd7a06ca" />
+<p align="center">
+<img width="1917" height="1009" alt="sistema" src="https://github.com/user-attachments/assets/ec2a42a7-03d3-44b7-bd32-f9f1fa320cef" />
+</p>
 
 - Las acciones están agrupadas en **poner al día**, **espacio**, **el equipo** y **al arrancar**: actualizar, **Actualizar todo** (APT + Snap + Flatpak), **Centro de aplicaciones** (lista unificada APT de escritorio + Snap + Flatpak: buscar, abrir, actualizar o desinstalar; ranking por espacio; atajos a Instalar .deb y la tienda), limpiar caché APT, gestor de software, autostart, **analisis de arranque** (systemd-analyze: tiempos por fase y servicios mas lentos con explicaciones), borrar archivos, vaciar papelera, procesos, duplicados, repositorios/PPA, **monitorización simplificada** (barras CPU/RAM/disco, procesos ordenables, Abrir/Finalizar), instalar `.deb`, desinstalar paquetes, logs, **Liberar espacio** (qué ocupa el disco, limpieza rápida o profunda: caché APT, journal, miniaturas, papelera, Snap antiguos y kernels viejos; atajos a Ver carpetas, Snap/Flatpak y Archivos grandes), **Snap y Flatpak** (listar con el espacio que ocupan, actualizar o desinstalar; van aparte de APT; si falta Flatpak se puede instalar desde ahí), SMART, servicios systemd, **servicios que fallan** (listar, reiniciar o ver un log corto), **Reparar Ubuntu** (evolución del diagnóstico: tarjeta por problema APT/dpkg/servicio/red/CUPS con confirmación qué/por qué/riesgos), **espacio de cada disco** (carpetas que más ocupan), **Bluetooth**, **Sonido** (reiniciar PipeWire/PulseAudio o cambiar de salida), **Pantallas** (espejo / extendido / una sola con xrandr o ajustes GNOME) y **Centro de seguridad** (checklist de firewall, actualizaciones, usuario y puertos en escucha con explicaciones; desde ahí se abre el cortafuegos ufw con reglas SSH/Samba/red local, Actualizar todo, o desactivar servicios conocidos).
 - **Historial de comandos**: vuelve a lanzar limpiezas y acciones ya ejecutadas, con confirmación.
@@ -43,8 +57,9 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Archivos
 
-<img width="799" height="766" alt="archivo" src="https://github.com/user-attachments/assets/03f7587a-ed85-42f1-b42a-0ccc29b46452" />
-
+<p align="center">
+<img width="1919" height="1007" alt="archivos" src="https://github.com/user-attachments/assets/aa974275-d1b8-4c89-86d1-ecabb9ac5010" />  
+</p>
 - Las acciones están agrupadas en **copias**, **proteger**, **organizar** y **comprobar y liberar**.
 - **Copiar a un USB**: Documentos o el escritorio, en una carpeta con la fecha en el nombre. Si el USB no está abierto, se monta; si no cabe, avisa y no copia. La restauración de un `.gz` antiguo sigue disponible. Cifrado/descifrado, búsqueda y renombrado masivo.
 - **Permisos y propietario** (chmod/chown, también recursivo).
@@ -53,8 +68,11 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 - **Hash MD5 / SHA-1 / SHA-256** para comprobar descargas.
 
 ### Internet
+<p align="center">
+<img width="1919" height="1009" alt="internet" src="https://github.com/user-attachments/assets/994a3d13-eb91-4b29-9dbc-82e8c9af6691" />
 
-<img width="906" height="771" alt="internet" src="https://github.com/user-attachments/assets/eb98713d-61bf-485f-81de-ed81493eac2f" />
+
+</p>
 
 - Acciones agrupadas en **conexión**, **ajustes de red** y **herramientas**.
 - Reiniciar interfaz, ping, escaneo de puertos, **puerto desde Internet** (aviso de riesgos; escucha local + comprobación en el navegador), test de velocidad, diagnóstico (traceroute/netstat) y **nivel de ruido** (SNR Wi-Fi, jitter y pérdida de paquetes).
@@ -66,8 +84,11 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 - El indicador del menú lateral muestra si hay Internet y, debajo, la IP privada (la de la red de casa, no la del túnel VPN), la IP pública y si hay **VPN** activa (ExpressVPN o túnel típico).
 
 ### Red local
+<p align="center">
+<img width="1920" height="1010" alt="redlocal" src="https://github.com/user-attachments/assets/9f5df260-e6bb-4282-8abb-9fda990d1aa5" />
 
-<img width="907" height="770" alt="red-local" src="https://github.com/user-attachments/assets/9973bf20-5c61-41ec-acad-663b4487deb9" />
+  
+</p>
 
 - Listado de equipos con **IP, nombre, MAC** y si comparte **Samba** (**quién hay en la red**, Wi‑Fi o cable; no hace falta entrar en el router).
 - Doble clic abre `smb://` en el administrador de archivos si está disponible.
@@ -77,7 +98,11 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Navegadores
 
-<img width="904" height="826" alt="nevagadores" src="https://github.com/user-attachments/assets/def51d5e-947e-426e-bc6a-84c2e65801bf" />
+<p align="center">
+<img width="1920" height="1012" alt="navegadores" src="https://github.com/user-attachments/assets/6e11a7c7-de90-4d5f-a90d-c43946ff78b2" />
+
+
+</p>
 
 - Acciones agrupadas en **abrir**, **instalar**, **limpiar** y **perfiles**.
 - Chrome, Firefox, Edge, **Brave, Chromium y Vivaldi**: abrir (también privado), instalar y limpiar caché/historial.
@@ -85,12 +110,13 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Diccionario y notas
 
-<img width="904" height="831" alt="diccionario" src="https://github.com/user-attachments/assets/764a6ec2-056b-45d7-a03f-25c408133475" />
+<p align="center">
+
+<img width="1921" height="1010" alt="diccionario" src="https://github.com/user-attachments/assets/4bf646cf-85ff-4e7f-9b81-5b0f13ef390a" />
+
+</p>
 
 - Diccionario GNU/Linux en línea (hace falta Internet).
-
-<img width="905" height="828" alt="notas" src="https://github.com/user-attachments/assets/beca1a2b-de5d-4f08-9d61-c36b4d41173a" />
-
 - **Notas** en una carpeta fija del usuario (`Documentos/Manten1d0/Notas` o `Documents/Manten1d0/Notas`), con listado de las últimas y editor `.md` / `.txt`.
 
 ### Ayuda y menús
