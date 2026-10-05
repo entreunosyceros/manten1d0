@@ -32,8 +32,10 @@ def mostrar_about():
 
     about_window = tk.Toplevel()
     about_window.title("Acerca De")
-    about_window.geometry("400x250")
+    # Altura mayor: franja + logo + texto completo sin recortar
+    about_window.geometry("420x480")
     about_window.resizable(False, False)
+    about_window.minsize(420, 480)
 
     dir_actual = os.path.dirname(os.path.realpath(__file__))
     ruta_imagen = os.path.join(dir_actual, "logo.png")
@@ -41,20 +43,30 @@ def mostrar_about():
 
     img_label = tk.Label(about_window, image=img)
     img_label.image = img
-    img_label.pack(pady=10)
+    img_label.pack(pady=(16, 8))
 
     about_label = tk.Label(
         about_window,
         text=(
             f"Manten1-d0 de Sistema Ubuntu\n"
-            f"Versión: {version_actual}\n"
+            f"Versión: {version_actual}\n\n"
             "Este programa realiza tareas de mantenimiento básico\n"
             "en sistemas Ubuntu.\n"
-            "No se dan garantías de ningún tipo.\n"
-            "Repositorio: https://github.com/sapoclay/manten1d0"
+            "No se dan garantías de ningún tipo.\n\n"
+            "Repositorio:\n"
+            "https://github.com/sapoclay/manten1d0"
         ),
+        justify=tk.CENTER,
     )
-    about_label.pack(padx=20, pady=20)
+    about_label.pack(padx=24, pady=(8, 24))
 
-    if preferencias.tema_seleccionado != "Claro":
-        preferencias.cambiar_tema(about_window, preferencias.tema_seleccionado)
+    preferencias.cambiar_tema(about_window, preferencias.tema_seleccionado)
+
+    about_window.update_idletasks()
+    ancho = about_window.winfo_width()
+    alto = about_window.winfo_height()
+    x = max(0, (about_window.winfo_screenwidth() - ancho) // 2)
+    y = max(0, (about_window.winfo_screenheight() - alto) // 3)
+    about_window.geometry(f"+{x}+{y}")
+    about_window.lift()
+    about_window.focus_force()

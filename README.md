@@ -4,7 +4,7 @@
 ------------------------------------------------------------------
 * Manten1d0: sistema de mantenimiento básico y otras herramientas para Ubuntu.
 * Creado con: Python 3.10.12
-* Versión actual del programa: **0.8.0**
+* Versión actual del programa: **0.8.1**
 * Probado en: Ubuntu 22.04
 ------------------------------------------------------------------
 Esto es un pequeño programa para realizar el mantenimiento básico de Ubuntu, y que así no me toquen las narices todos los días cuando quiere instalar un programa, llega una actualización del sistema y cosas por el estilo.
@@ -13,28 +13,17 @@ La contraseña de sudo se pide una vez al iniciar y se guarda cifrada. Las accio
 
 Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
-## Características de la versión 0.8.0
+## Características de la versión 0.8.1
 
 ### Inicio
 
-- Barra lateral plana: la categoría activa queda marcada; los botones responden al pasar el ratón (también en tema oscuro).
-- Logo `Manten1do.png` a tamaño del área disponible.
-- **Diagnóstico del equipo**: checklist completa (ok / aviso / error) con Internet, espacio en disco, reinicio pendiente, actualizaciones APT, SMART, temperatura, servicios systemd fallidos y cortafuegos (ufw). Resumen arriba: problemas y avisos, o «Sin problemas detectados».
-- Pulsar un resultado abre la herramienta concreta (limpieza de disco, Salud discos, servicios que fallan, cortafuegos…) o la categoría relacionada. El de reinicio pide confirmación y reinicia el equipo.
-- **Analizar mi equipo** vuelve a ejecutar el diagnóstico. **Reparar Ubuntu** continúa el diagnóstico con **tarjetas por problema** (dependencias APT, paquetes a medias, cada servicio fallido, red, CUPS): cada reparación explica qué hará, por qué y los riesgos; también hay otras reparaciones útiles (audio, caché APT…). **Liberar espacio** muestra qué ocupa la carpeta personal, el espacio recuperable y perfiles de limpieza rápida o profunda. **Actualizar todo** cuenta e instala pendientes de APT, Snap y Flatpak. **Informe de asistencia** genera un texto del diagnóstico y del equipo para enviarlo a quien ayude. Se puede abrir el registro de acciones.
+- **¿Qué problema tienes?**: asistente técnico por síntoma. Eliges Internet, sonido, impresora, pantalla, lentitud, espacio, instalación, actualizaciones, Bluetooth o arranque lento; Manten1d0 hace el diagnóstico concreto y propone la herramienta o reparación adecuada.
+- Diagnóstico del equipo (checklist completa), **Reparar Ubuntu**, **Liberar espacio**, **Actualizar todo**, **Informe de asistencia** y registro de acciones.
+- Diálogos de arranque (contraseña y dependencias) con el mismo estilo visible.
 
 ### Perfil de usuario
 
-<img width="799" height="765" alt="perfil-usuario" src="https://github.com/user-attachments/assets/2f672cdc-e862-41e7-b748-4f8aa8179e6b" />
-
-- Muestra lo esencial: foto, usuario, nombre visible, **configuración regional** (país, formatos, moneda, zona horaria) e **idioma de la interfaz**. La pestaña tiene desplazamiento vertical si hace falta.
-- **Mi carpeta personal**: ruta del home, abrir en el explorador, ver espacio utilizado (Documentos, Descargas, Vídeos…) o ir a **Liberar espacio**.
-- **Aplicaciones predeterminadas**: navegador, correo, visor de imágenes, vídeo y editor de texto; se puede restaurar lo del sistema.
-- **Carpetas personales**: Documentos, Descargas, Música, Imágenes, Vídeos y Escritorio (solo consulta; Abrir en el explorador).
-- **Contraseña**: último cambio y estado; **Cambiar contraseña** con indicador de fuerza, checklist, mostrar/ocultar y aviso de no reutilizar claves. Caducidad solo si el sistema la tiene configurada.
-- **Idioma de la interfaz**: elige entre los idiomas instalados; se aplica al iniciar la próxima sesión.
-- **Configuración regional**: resumen de formatos; para cambiarlos se abre el panel de Ubuntu.
-- El formulario de edición permite cambiar nombre visible e imagen (el login no se altera desde aquí).
+- Carpeta personal con espacio utilizado y enlace a Liberar espacio; aplicaciones predeterminadas; carpetas XDG (solo consulta); contraseña con fuerza y estado; idioma y región.
 
 ### Información
 
@@ -106,7 +95,7 @@ Las versiones anteriores están en [CHANGELOG.md](CHANGELOG.md).
 
 ### Ayuda y menús
 
-- Menú **Ayuda**: documentación de todas las opciones y ventana Acerca de (versión 0.8.0).
+- Menú **Ayuda**: documentación de todas las opciones y ventana Acerca de (versión 0.8.1).
 - Archivo: terminal, abrir URL, salir.
 - Preferencias: tema claro, o el tema oscuro del sistema (GTK), paleta más suave, tamaño de texto, actualizaciones, repositorio GitHub, registro de acciones (con opción de **vaciarlo** sin tocar el historial de comandos repetibles) y atajos **Alt+1 … Alt+0**.
 
@@ -136,7 +125,7 @@ bash packaging/build-deb.sh
 En una terminal (`Ctrl+Alt+T`):
 
 ```
-sudo apt install -f ./manten1d0_0.8.0_all.deb
+sudo apt install -f ./manten1d0_0.8.1_all.deb
 ```
 
 o, como indica el nombre corto:

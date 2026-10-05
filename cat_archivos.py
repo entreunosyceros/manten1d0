@@ -218,10 +218,15 @@ def descifrar_archivo():
     
 class FileSearchApp:
     def __init__(self, master):
-        self.master = master
-        self.master.title("Buscador De Archivos En El Sistema")
+        self.window = master
+        try:
+            from dialogo_estilo import panel_contenido
+            self.master = panel_contenido(master)
+        except Exception:
+            self.master = master
+        self.window.title("Buscador De Archivos En El Sistema")
        # self.master.geometry("800x600")  # Tamaño fijo de la ventana
-        self.master.resizable(False, False)  # La ventana no se puede redimensionar
+        self.window.resizable(False, False)  # La ventana no se puede redimensionar
         
         self.create_widgets()
     
@@ -298,8 +303,13 @@ class FileSearchApp:
 
 class BulkRenameApp:
     def __init__(self, master):
-        self.master = master
-        self.master.title("Renombrar Archivos Masivamente")
+        self.window = master
+        try:
+            from dialogo_estilo import panel_contenido
+            self.master = panel_contenido(master)
+        except Exception:
+            self.master = master
+        self.window.title("Renombrar Archivos Masivamente")
         self.create_widgets()
 
     def create_widgets(self):

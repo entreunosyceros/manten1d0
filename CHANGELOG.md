@@ -1,8 +1,15 @@
 # Historial de versiones
 
-Cambios de Manten1d0 anteriores a la [versión 0.8.0](README.md).
+Cambios de Manten1d0 anteriores a la [versión 0.8.1](README.md).
 
 ------------------------------------------------------------------
+
+## Versión 0.8.0
+
+- Inicio: diagnóstico completo (Internet, disco, APT, SMART, temperatura, servicios, ufw), Reparar Ubuntu, Liberar espacio, Actualizar todo, Informe de asistencia.
+- Sistema: Centro de aplicaciones, Centro de seguridad, análisis de arranque, monitor de recursos, asistente de Internet.
+- Perfil: idioma de sesión, configuración regional.
+- Arranque: diálogo de contraseña y mensajes de dependencias más visibles.
 
 ## Versión 0.7.0
 

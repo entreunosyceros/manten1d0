@@ -67,7 +67,9 @@ python3 -m compileall -q .
 | `analisis_arranque.py` | Analisis de arranque (systemd-analyze, blame, explicaciones) |
 | `monitor_recursos.py` | Monitor del sistema (CPU/RAM/disco, procesos, Abrir/Finalizar) |
 | `asistente_internet.py` | Asistente de problemas de Internet (checklist + soluciones) |
+| `asistente_problemas.py` | Asistente «Que problema tienes?» (diagnostico por sintoma) |
 | `informe_asistencia.py` | Informe de diagnóstico + equipo para exportar |
+| `dialogo_estilo.py` | Estilo comun de dialogos de arranque |
 | `documentacion.py` / `about.py` | Ayuda y Acerca de |
 | `actualizaciones.py` | Búsqueda de versiones en GitHub Releases |
 | `cat_sistema.py`, `cat_sistema_extra.py` | Sistema: limpiezas, SMART, servicios, impresoras… |

@@ -2,6 +2,7 @@
 
 import json
 import os
+import queue
 import shlex
 import subprocess
 import threading
@@ -151,7 +152,12 @@ def vaciar_registro():
 
 
 def confirmar(mensaje, parent=None, titulo="¿Seguro?"):
-    return messagebox.askyesno(titulo, mensaje, parent=parent)
+    try:
+        import dialogo_estilo as estilo
+
+        return estilo.dialogo_confirmar(mensaje, parent=parent, titulo=titulo)
+    except Exception:
+        return messagebox.askyesno(titulo, mensaje, parent=parent)
 
 
 def mostrar_registro(parent=None):
@@ -259,6 +265,132 @@ def _widget_vivo(widget):
         return False
 
 
+_cola_ui = queue.Queue()
+_pumps_ui = set()
+_raiz_bombeo = None
+_after_bombeo = None
+
+
+def detener_bombeo_ui():
+    """Cancela el bombeo periódico (llamar antes de destruir una raíz Tk)."""
+    global _raiz_bombeo, _after_bombeo
+    raiz = _raiz_bombeo
+    after_id = _after_bombeo
+    _raiz_bombeo = None
+    _after_bombeo = None
+    _pumps_ui.clear()
+    if raiz is None or after_id is None:
+        return
+    try:
+        raiz.after_cancel(after_id)
+    except tk.TclError:
+        pass
+
+
+def vincular_bombeo_ui(raiz):
+    """Arranca el bombeo periódico de la cola UI (una ventana Tk activa)."""
+    global _raiz_bombeo, _after_bombeo
+    if raiz is None:
+        return
+    if raiz is _raiz_bombeo and id(raiz) in _pumps_ui:
+        return
+    detener_bombeo_ui()
+    _raiz_bombeo = raiz
+    _after_bombeo = None
+    _pumps_ui.add(id(raiz))
+    _bombeo_ui(raiz)
+
+
+def programar_ui(widget, func, *args, **kwargs):
+    """Ejecuta func en el hilo de Tk (seguro llamarlo desde otros hilos)."""
+
+    def tarea():
+        if widget is not None and not _widget_vivo(widget):
+            return
+        try:
+            func(*args, **kwargs)
+        except tk.TclError:
+            pass
+
+    _cola_ui.put(tarea)
+
+    # Desde un hilo secundario no se puede tocar Tk (ni winfo ni after).
+    if threading.current_thread() is not threading.main_thread():
+        return
+
+    try:
+        raiz = widget.winfo_toplevel() if widget is not None else _raiz_bombeo
+    except tk.TclError:
+        raiz = _raiz_bombeo
+    if raiz is None:
+        raiz = getattr(tk, "_default_root", None)
+    if raiz is None:
+        return
+    if raiz is _raiz_bombeo and id(raiz) in _pumps_ui:
+        return
+    vincular_bombeo_ui(raiz)
+
+
+def obtener_contrasena_segura(parent=None):
+    """Pide la contraseña siempre en el hilo de Tk (válido desde en_hilo)."""
+    if threading.current_thread() is threading.main_thread():
+        return obtener_contrasena()
+    listo = threading.Event()
+    holder = []
+
+    def pedir():
+        try:
+            holder.append(obtener_contrasena())
+        finally:
+            listo.set()
+
+    ancla = parent if parent is not None else _raiz_bombeo
+    programar_ui(ancla, pedir)
+    listo.wait()
+    return holder[0] if holder else None
+
+
+def _bombeo_ui(raiz):
+    global _after_bombeo
+    # Si ya hay otra raíz activa (o se detuvo el bombeo), no reprogramar.
+    if raiz is not _raiz_bombeo:
+        _pumps_ui.discard(id(raiz))
+        return
+    try:
+        if not raiz.winfo_exists():
+            if raiz is _raiz_bombeo:
+                detener_bombeo_ui()
+            else:
+                _pumps_ui.discard(id(raiz))
+            return
+    except tk.TclError:
+        if raiz is _raiz_bombeo:
+            detener_bombeo_ui()
+        else:
+            _pumps_ui.discard(id(raiz))
+        return
+
+    for _ in range(80):
+        try:
+            tarea = _cola_ui.get_nowait()
+        except queue.Empty:
+            break
+        try:
+            tarea()
+        except Exception:
+            pass
+
+    if raiz is not _raiz_bombeo:
+        return
+    try:
+        _after_bombeo = raiz.after(50, lambda r=raiz: _bombeo_ui(r))
+    except tk.TclError:
+        if raiz is _raiz_bombeo:
+            detener_bombeo_ui()
+        else:
+            _pumps_ui.discard(id(raiz))
+
+
 def en_hilo(widget, funcion, al_terminar=None, al_error=None):
     """Ejecuta funcion() en un hilo y devuelve el resultado al hilo de la UI."""
 
@@ -275,32 +407,42 @@ def en_hilo(widget, funcion, al_terminar=None, al_error=None):
             resultado = funcion()
         except Exception as error:
             if al_error:
-                if _widget_vivo(widget):
-                    widget.after(0, lambda e=error: _en_ui(al_error, e))
-            elif _widget_vivo(widget):
-                widget.after(
-                    0,
+                programar_ui(widget, lambda e=error: _en_ui(al_error, e))
+            else:
+                programar_ui(
+                    widget,
                     lambda e=error: _en_ui(
                         lambda err: messagebox.showerror("Error", str(err), parent=widget),
                         e,
                     ),
                 )
             return
-        if al_terminar and _widget_vivo(widget):
-            widget.after(0, lambda r=resultado: _en_ui(al_terminar, r))
+        if al_terminar:
+            programar_ui(widget, lambda r=resultado: _en_ui(al_terminar, r))
 
     threading.Thread(target=trabajador, daemon=True).start()
 
 
 def ventana_progreso(parent, titulo, mensaje="Trabajando..."):
+    import dialogo_estilo as estilo
+
     ventana = tk.Toplevel(parent)
-    ventana.title(titulo)
-    ventana.geometry("420x110")
-    ventana.transient(parent)
-    etiqueta = tk.Label(ventana, text=mensaje, padx=10, pady=8)
-    etiqueta.pack()
-    barra = ttk.Progressbar(ventana, mode="indeterminate", length=320)
-    barra.pack(pady=8)
+    cuerpo = estilo.preparar_dialogo(
+        ventana,
+        titulo,
+        (titulo or "Progreso").upper()[:48],
+        420,
+        160,
+        topmost=True,
+    )
+    try:
+        ventana.transient(parent)
+    except tk.TclError:
+        pass
+    etiqueta = estilo.etiqueta_texto(cuerpo, mensaje, wraplength=360)
+    etiqueta.pack(anchor="w", pady=(0, 8))
+    barra = ttk.Progressbar(cuerpo, mode="indeterminate", length=360)
+    barra.pack(fill=tk.X, pady=4)
     barra.start()
     return ventana, etiqueta
 
@@ -315,7 +457,7 @@ def sudo_run(args, descripcion, parent=None, confirmar_accion=False, timeout=300
         if not confirmar(f"{descripcion}\n\nComando: {comando}\n\n¿Quieres continuar?", parent):
             registrar(descripcion, "cancelado por el usuario", False)
             return None
-    contrasena = obtener_contrasena()
+    contrasena = obtener_contrasena_segura(parent)
     entorno = os.environ.copy()
     entorno["LC_ALL"] = "C"
     try:
@@ -376,15 +518,18 @@ def sudo_shell(comando, descripcion, parent, confirmar_accion=True, on_done=None
             proceso.stdin.close()
             for linea in proceso.stdout:
                 if _widget_vivo(parent):
-                    parent.after(0, lambda t=linea.strip(): actualizar(t))
+                    programar_ui(parent, actualizar, linea.strip())
             codigo = proceso.wait()
         except Exception as error:
             registrar(descripcion, str(error), False)
             if _widget_vivo(parent):
-                parent.after(0, lambda: finalizar(1))
-                parent.after(0, lambda e=error: messagebox.showerror("Error", str(e), parent=parent))
+                programar_ui(parent, lambda: finalizar(1))
+                programar_ui(
+                    parent,
+                    lambda e=error: messagebox.showerror("Error", str(e), parent=parent),
+                )
             return
         if _widget_vivo(parent):
-            parent.after(0, lambda c=codigo: finalizar(c))
+            programar_ui(parent, finalizar, codigo)
 
     threading.Thread(target=trabajador, daemon=True).start()

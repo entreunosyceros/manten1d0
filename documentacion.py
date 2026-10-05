@@ -1,9 +1,12 @@
 """Ventana de documentación de las opciones de Manten1d0."""
 
+import os
 import tkinter as tk
 from tkinter import ttk
 
 import preferencias
+
+RUTA_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
 
 SECCIONES = (
     (
@@ -49,20 +52,24 @@ SECCIONES = (
         "Inicio",
         "Diagnóstico del equipo. Muestra el logo, una checklist de estado y accesos rápidos.\n\n"
         "Cada comprobación aparece siempre (ok, aviso o error):\n"
-        "• Conexión a Internet (al pulsar se abre el asistente de problemas de Internet).\n"
-        "• Disco raíz o carpeta personal (aviso ≥80 %, crítico ≥90 %). "
+        "- Conexión a Internet (al pulsar se abre el asistente de problemas de Internet).\n"
+        "- Disco raíz o carpeta personal (aviso >=80 %, crítico >=90 %). "
         "Si hay poco espacio, nombra las tres carpetas que más ocupan. Se puede borrar sin miedo la caché, "
         "las miniaturas y la papelera. No se deben borrar máquinas virtuales ni documentos.\n"
-        "• Reinicio pendiente tras una actualización. Al pulsarlo, pide confirmación y reinicia.\n"
-        "• Actualizaciones de APT pendientes, incluidas las de seguridad.\n"
-        "• Estado SMART de los discos (o aviso si no se puede leer).\n"
-        "• Temperatura de CPU (y ventiladores si hay sensores).\n"
-        "• Servicios systemd que han fallado.\n"
-        "• Cortafuegos ufw (activo, inactivo o no instalado); al pulsar se abre el Centro de seguridad.\n\n"
+        "- Reinicio pendiente tras una actualización. Al pulsarlo, pide confirmación y reinicia.\n"
+        "- Actualizaciones de APT pendientes, incluidas las de seguridad.\n"
+        "- Estado SMART de los discos (o aviso si no se puede leer).\n"
+        "- Temperatura de CPU (y ventiladores si hay sensores).\n"
+        "- Servicios systemd que han fallado.\n"
+        "- Cortafuegos ufw (activo, inactivo o no instalado); al pulsar se abre el Centro de seguridad.\n\n"
         "Arriba se muestra un resumen (problemas / avisos, o «Sin problemas detectados»).\n"
         "Al pulsar un resultado se abre la herramienta concreta (limpieza, Salud discos, "
         "servicios que fallan, Centro de seguridad...) o la categoría relacionada.\n"
         "Analizar mi equipo vuelve a ejecutar el diagnóstico.\n"
+        "Que problema tienes? abre un asistente por sintoma (Internet, sonido, "
+        "impresora, pantalla, lentitud, espacio, instalar, actualizaciones, "
+        "Bluetooth, arranque). Diagnostica solo ese caso y propone la herramienta "
+        "o reparacion adecuada.\n"
         "Reparar Ubuntu continúa el diagnóstico con tarjetas «Problema detectado» "
         "(dependencias APT, paquetes a medias, cada servicio fallido, red, CUPS). "
         "Antes de actuar explica qué va a hacer, por qué y qué riesgos tiene. "
@@ -99,8 +106,8 @@ SECCIONES = (
         "minusculas, numeros, simbolo), opcion de mostrar lo escrito y aviso de no reutilizar "
         "claves de otros servicios. Si el sistema tiene caducidad configurada, se indica.\n\n"
         "Modificar Perfil Usuario abre un formulario para cambiar:\n"
-        "• Nombre visible (campo GECOS).\n"
-        "• Imagen de perfil.\n\n"
+        "- Nombre visible (campo GECOS).\n"
+        "- Imagen de perfil.\n\n"
         "El nombre de usuario de login no se modifica desde aquí.",
     ),
     (
@@ -296,13 +303,13 @@ SECCIONES = (
         "del sistema (zona de indicadores).\n\n"
         "Clic izquierdo: muestra u oculta la ventana principal.\n"
         "Clic derecho: menú contextual con las acciones habituales:\n"
-        "• Mostrar ventana / Ocultar a la bandeja.\n"
-        "• Ir a una categoría (Inicio, Sistema, Archivos, etc.).\n"
-        "• Abrir terminal, Opciones, registro y buscar actualizaciones.\n"
-        "• Documentación y Acerca de.\n"
-        "• Salir (cierra el programa de verdad y borra la contraseña cifrada de esta sesión).\n\n"
+        "- Mostrar ventana / Ocultar a la bandeja.\n"
+        "- Ir a una categoría (Inicio, Sistema, Archivos, etc.).\n"
+        "- Abrir terminal, Opciones, registro y buscar actualizaciones.\n"
+        "- Documentación y Acerca de.\n"
+        "- Salir (cierra el programa de verdad y borra la contraseña cifrada de esta sesión).\n\n"
         "La X de la ventana oculta Manten1d0 a la bandeja; no lo cierra. Para salir usa "
-        "Archivo → Salir o la opción Salir del icono.",
+        "Archivo -> Salir o la opción Salir del icono.",
     ),
 )
 
@@ -392,6 +399,22 @@ def mostrar_documentacion(parent=None):
     texto.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     texto.tag_configure("titulo", font=("Arial", 14, "bold"), spacing3=8)
     texto.tag_configure("cuerpo", font=("Arial", 11), spacing1=2)
+    texto.tag_configure("logo", justify=tk.CENTER, spacing1=6, spacing3=12)
+    _logo_doc = {"foto": None}
+
+    def _cargar_logo_doc():
+        if _logo_doc["foto"] is not None:
+            return _logo_doc["foto"]
+        try:
+            from PIL import Image, ImageTk
+
+            imagen = Image.open(RUTA_LOGO)
+            imagen.thumbnail((220, 220), getattr(Image, "LANCZOS", Image.NEAREST))
+            foto = ImageTk.PhotoImage(imagen, master=ventana)
+            _logo_doc["foto"] = foto
+            return foto
+        except Exception:
+            return None
 
     def mostrar_seccion(indice):
         if indice < 0 or indice >= len(SECCIONES):
@@ -400,6 +423,13 @@ def mostrar_documentacion(parent=None):
         texto.configure(state=tk.NORMAL)
         texto.delete("1.0", tk.END)
         texto.insert("1.0", titulo + "\n", "titulo")
+        # Pantalla inicial (Presentación): logo bajo el título
+        if indice == 0:
+            foto = _cargar_logo_doc()
+            if foto is not None:
+                texto.insert(tk.END, "\n", "logo")
+                texto.image_create(tk.END, image=foto)
+                texto.insert(tk.END, "\n\n", "logo")
         texto.insert(tk.END, cuerpo_seccion, "cuerpo")
         texto.configure(state=tk.DISABLED)
 

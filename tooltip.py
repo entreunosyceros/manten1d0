@@ -60,17 +60,24 @@ class ToolTip:
         x = self.widget.winfo_rootx() + 12
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
 
-        self.tooltip = tk.Toplevel(self.widget)
+        # chrome=False: sin franja Manten1d0 (el parche de Toplevel la añadiría)
+        try:
+            self.tooltip = tk.Toplevel(self.widget, chrome=False)
+        except (TypeError, tk.TclError):
+            self.tooltip = tk.Toplevel(self.widget)
         self.tooltip.wm_overrideredirect(True)
         self.tooltip.wm_geometry(f"+{x}+{y}")
         try:
             self.tooltip.attributes("-topmost", True)
         except tk.TclError:
             pass
+        # Fondo claro del tip: el texto siempre en negro (también con tema Oscuro,
+        # donde option_add pondría el Label en gris claro y se leería mal).
         label = tk.Label(
             self.tooltip,
             text=self.text,
             bg="#ffffe0",
+            fg="#000000",
             relief="solid",
             borderwidth=1,
             justify=tk.LEFT,

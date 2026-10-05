@@ -38,11 +38,25 @@ _COLORES_CLARO = {
     "borde": "#dcdad5",
     "hover": "#d9e5f5",
 }
+# Paleta oscura unificada (gris homogéneo; hover = gris más oscuro)
+_COLORES_OSCURO = {
+    "bg": "#2c2c2c",
+    "fg": "#e6e6e6",
+    "base": "#2c2c2c",
+    "text": "#e6e6e6",
+    "select": "#3584e4",
+    "select_fg": "#ffffff",
+    "sidebar": "#2c2c2c",
+    "sidebar_activa": "#1f1f1f",
+    "borde": "#3a3a3a",
+    "hover": "#1a1a1a",
+}
 _familia_ui = None
 _cache_oscuro = None
 _FONDOS_ESTADO = {
     "green", "red",
     "#c0392b", "#e67e22", "#1e8449", "#2471a3",
+    "#1a5276", "#0f2d4a", "#2874a6", "#b9770e", "#922b21",
 }
 
 
@@ -87,6 +101,76 @@ def color_borde():
 
 def color_hover():
     return colores_de(tema_seleccionado).get("hover", color_barra_activa())
+
+
+def aplicar_defaults_tema(raiz=None, tema=None):
+    """Fija colores por defecto de Tk para Labels/Frames/Text (evita gris de sistema)."""
+    tema_usar = tema or tema_seleccionado
+    colores = colores_de(tema_usar)
+    fondo = colores["bg"]
+    frente = colores["fg"]
+    campo = colores["base"]
+    texto = colores["text"]
+    seleccionado = colores["select"]
+    seleccionado_fg = colores["select_fg"]
+    hover = colores.get("hover", campo)
+
+    widget = raiz
+    if widget is None:
+        widget = getattr(tk, "_default_root", None)
+    if widget is None:
+        return
+
+    try:
+        widget.tk_setPalette(
+            background=fondo,
+            foreground=frente,
+            activeBackground=hover,
+            activeForeground=frente,
+            selectBackground=seleccionado,
+            selectForeground=seleccionado_fg,
+            highlightColor=seleccionado,
+            highlightBackground=fondo,
+            insertBackground=texto,
+            troughColor=campo,
+        )
+    except tk.TclError:
+        pass
+
+    pares = (
+        ("*Background", fondo),
+        ("*Foreground", frente),
+        ("*Label.Background", fondo),
+        ("*Label.Foreground", frente),
+        ("*Frame.Background", fondo),
+        ("*Labelframe.Background", fondo),
+        ("*Labelframe.Foreground", frente),
+        ("*Toplevel.Background", fondo),
+        ("*Canvas.Background", fondo),
+        ("*Button.Background", fondo),
+        ("*Button.Foreground", frente),
+        ("*Button.activeBackground", hover),
+        ("*Button.activeForeground", frente),
+        ("*Checkbutton.Background", fondo),
+        ("*Checkbutton.Foreground", frente),
+        ("*Radiobutton.Background", fondo),
+        ("*Radiobutton.Foreground", frente),
+        ("*Entry.Background", campo),
+        ("*Entry.Foreground", texto),
+        ("*Text.Background", campo),
+        ("*Text.Foreground", texto),
+        ("*Listbox.Background", campo),
+        ("*Listbox.Foreground", texto),
+        ("*Spinbox.Background", campo),
+        ("*Spinbox.Foreground", texto),
+        ("*Menu.Background", fondo),
+        ("*Menu.Foreground", frente),
+    )
+    for patron, valor in pares:
+        try:
+            widget.option_add(patron, valor)
+        except tk.TclError:
+            continue
 
 
 def aplicar_hover(boton, fondo_normal=None, fondo_hover=None):
@@ -247,49 +331,61 @@ def _ruta_tema(nombre):
     return ""
 
 
+def _luminancia(hex_color):
+    try:
+        h = hex_color.lstrip("#")
+        if len(h) != 6:
+            return 128
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return (r * 299 + g * 587 + b * 114) / 1000
+    except ValueError:
+        return 128
+
+
+def _oscurecer(hex_color, peso_negro=0.35):
+    """Acerca el color al negro (hover / estado activo en tema oscuro)."""
+    peso = max(0.0, min(1.0, 1.0 - peso_negro))
+    return _mezclar(hex_color, "#000000", peso)
+
+
 def _colores_oscuros_sistema():
+    """Paleta oscura homogénea en grises; el hover siempre es más oscuro."""
+    base = dict(_COLORES_OSCURO)
     ruta = _ruta_tema(_tema_gtk_oscuro()) or _ruta_tema("Yaru-dark") or _ruta_tema("Adwaita-dark")
     if not ruta:
-        return {
-            "bg": "#383838",
-            "fg": "#deddda",
-            "base": "#404040",
-            "text": "#deddda",
-            "select": "#E95420",
-            "select_fg": "#FFFFFF",
-            "sidebar": "#333333",
-            "sidebar_activa": "#454545",
-            "borde": "#4a4a4a",
-            "hover": "#555555",
-        }
+        return base
     try:
         with open(ruta, encoding="utf-8", errors="replace") as archivo:
             texto = archivo.read().replace("\\n", "\n")
     except OSError:
-        texto = ""
+        return base
     encontrados = {}
     for clave, valor in re.findall(
         r"(text_color|base_color|fg_color|bg_color|selected_fg_color|selected_bg_color)\s*:\s*(#[0-9A-Fa-f]{3,8})",
         texto,
     ):
         encontrados[clave] = valor
-    fondo = encontrados.get("bg_color", "#383838")
-    frente = encontrados.get("fg_color", "#deddda")
-    campo = encontrados.get("base_color", fondo)
-    # Acerca barra y contenido al color de fondo para que no haya un corte duro.
-    frente_suave = _mezclar(frente, fondo, 0.82)
+    fondo = encontrados.get("bg_color", base["bg"])
+    # Si el GTK aporta un fondo claro, no lo usamos (rompería el tema oscuro).
+    if _luminancia(fondo) > 120:
+        return base
+    frente = encontrados.get("fg_color", base["fg"])
+    if _luminancia(frente) < 100:
+        frente = base["fg"]
+    seleccionado = encontrados.get("selected_bg_color", base["select"])
+    seleccionado_fg = encontrados.get("selected_fg_color", base["select_fg"])
+    # Un solo gris de fondo; hover y activa = más oscuros
     return {
         "bg": fondo,
-        "fg": frente_suave,
-        "base": _mezclar(campo, fondo, 0.55),
-        "text": frente_suave,
-        "select": encontrados.get("selected_bg_color", "#E95420"),
-        "select_fg": encontrados.get("selected_fg_color", "#FFFFFF"),
-        "sidebar": _mezclar(fondo, "#000000", 0.92),
-        "sidebar_activa": _mezclar(campo, fondo, 0.45),
-        "borde": _mezclar(campo, fondo, 0.35),
-        # Gris un poco más claro que el botón, para leer el texto claro.
-        "hover": _mezclar("#ffffff", fondo, 0.28),
+        "fg": frente,
+        "base": fondo,
+        "text": frente,
+        "select": seleccionado,
+        "select_fg": seleccionado_fg,
+        "sidebar": fondo,
+        "sidebar_activa": _oscurecer(fondo, 0.28),
+        "borde": _mezclar(fondo, "#ffffff", 0.82),
+        "hover": _oscurecer(fondo, 0.40),
     }
 
 
@@ -353,6 +449,7 @@ def cambiar_tema(ventana, tema):
     seleccionado = colores["select"]
     seleccionado_fg = colores["select_fg"]
     _estilo_ttk(colores)
+    aplicar_defaults_tema(ventana, tema)
 
     def pintar(widget):
         try:
@@ -373,7 +470,19 @@ def cambiar_tema(ventana, tema):
             return
         if _es_tipo(child, tk.Label):
             actual = str(child.cget("bg")).lower()
-            if actual not in _FONDOS_ESTADO:
+            if getattr(child, "_zona", None) == "franja_estilo":
+                try:
+                    import dialogo_estilo as estilo
+
+                    raiz = child.winfo_toplevel()
+                    color = getattr(raiz, "_color_franja_estilo", None) or estilo.paleta()["franja"]
+                    child.config(
+                        background=color,
+                        foreground=estilo.paleta()["franja_fg"],
+                    )
+                except Exception:
+                    pass
+            elif actual not in _FONDOS_ESTADO:
                 if getattr(child, "_zona", None) == "barra":
                     child.config(
                         background=colores.get("sidebar", fondo),
@@ -384,10 +493,11 @@ def cambiar_tema(ventana, tema):
         elif _es_tipo(child, tk.Button) and getattr(child, "_zona", None) == "barra":
             activa = getattr(child, "_nav_activa", False)
             fondo_btn = colores.get("sidebar_activa" if activa else "sidebar", fondo)
+            hover = colores.get("hover", fondo_btn)
             child.config(
                 background=fondo_btn,
                 foreground=frente,
-                activebackground=fondo_btn,
+                activebackground=hover,
                 activeforeground=frente,
                 relief="flat",
                 borderwidth=0,
@@ -396,7 +506,7 @@ def cambiar_tema(ventana, tema):
             )
             if getattr(child, "_hover_aplicado", False):
                 child._hover_fondo = colores.get("sidebar", fondo)
-                child._hover_sobre = None
+                child._hover_sobre = hover
                 child._hover_dentro = False
                 child._hover_antes = None
         elif _es_tipo(child, tk.Button, tk.Menubutton):
@@ -404,22 +514,24 @@ def cambiar_tema(ventana, tema):
             if actual in _FONDOS_ESTADO:
                 pintar(child)
                 return
+            hover = colores.get("hover", fondo)
             child.config(
                 background=fondo,
                 foreground=frente,
-                activebackground=fondo,
+                activebackground=hover,
                 activeforeground=frente,
             )
             if getattr(child, "_hover_aplicado", False):
-                child._hover_fondo = campo
-                child._hover_sobre = None
+                child._hover_fondo = fondo
+                child._hover_sobre = hover
                 child._hover_dentro = False
                 child._hover_antes = None
         elif _es_tipo(child, tk.Checkbutton, tk.Radiobutton):
+            hover = colores.get("hover", fondo)
             child.config(
                 background=fondo,
                 foreground=frente,
-                activebackground=fondo,
+                activebackground=hover,
                 activeforeground=frente,
                 selectcolor=campo,
             )
@@ -446,7 +558,16 @@ def cambiar_tema(ventana, tema):
                 if child.type(item) == "line":
                     child.itemconfig(item, fill=frente)
         elif _es_tipo(child, tk.Frame, tk.LabelFrame, tk.Toplevel, tk.Tk):
-            if getattr(child, "_zona", None) == "barra":
+            if getattr(child, "_zona", None) == "franja_estilo":
+                try:
+                    import dialogo_estilo as estilo
+
+                    raiz = child.winfo_toplevel()
+                    color = getattr(raiz, "_color_franja_estilo", None) or estilo.paleta()["franja"]
+                    child.config(background=color)
+                except Exception:
+                    pass
+            elif getattr(child, "_zona", None) == "barra":
                 child.config(background=colores.get("sidebar", fondo))
             else:
                 child.config(background=fondo)
@@ -456,6 +577,17 @@ def cambiar_tema(ventana, tema):
     try:
         ventana.config(background=fondo)
     except tk.TclError:
+        pass
+    # Refrescar chrome de dialogos/toplevels con franja
+    try:
+        import dialogo_estilo as estilo
+
+        if getattr(ventana, "_chrome_manten", False):
+            estilo.refrescar_chrome_tema(ventana)
+        for hijo in list(ventana.winfo_children()):
+            if getattr(hijo, "_chrome_manten", False):
+                estilo.refrescar_chrome_tema(hijo)
+    except Exception:
         pass
 
 
@@ -486,19 +618,18 @@ def abrir_ventana_configuracion(root):
             actualizar_fuente(child, size)
 
     def aplicar_cambios():
-        global tema_seleccionado 
-        nuevo_tema = tema_selector.get()  # Actualizar el tema seleccionado
+        global tema_seleccionado
+        nuevo_tema = tema_selector.get()
 
         if nuevo_tema:
             invalidar_colores_sistema()
-            # Aplicar el nuevo tema a la ventana principal y a las secundarias
+            # Actualizar primero para que hover/defaults lean el tema nuevo
+            tema_seleccionado = nuevo_tema
             if root.winfo_exists():
                 cambiar_tema(root, nuevo_tema)
             for ventana in ventanas_secundarias:
                 if ventana.winfo_exists():
                     cambiar_tema(ventana, nuevo_tema)
-            # Actualizar tema_seleccionado solo si se selecciona un nuevo tema
-            tema_seleccionado = nuevo_tema
         else:
             messagebox.showwarning("Advertencia", "Debes seleccionar un tema antes de aplicar los cambios.")
         config_window.destroy()

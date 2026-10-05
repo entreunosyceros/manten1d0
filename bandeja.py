@@ -10,6 +10,7 @@ import sys
 import threading
 
 RUTA_ICONO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
+RUTA_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
 RUTA_ESTE = os.path.abspath(__file__)
 CLASE_VENTANA = "Manten1d0"
 
@@ -18,11 +19,35 @@ _ICONOS_FOTO = []
 _ICONO_PARCHE_TOPLEVEL = False
 
 
+def _imagen_cuadrada_desde_archivo(ruta, lado=128):
+    """Carga un PNG y lo centra en un lienzo cuadrado transparente."""
+    from PIL import Image
+
+    imagen = Image.open(ruta).convert("RGBA")
+    ancho, alto = imagen.size
+    lienzo = max(ancho, alto)
+    salida = Image.new("RGBA", (lienzo, lienzo), (0, 0, 0, 0))
+    salida.paste(imagen, ((lienzo - ancho) // 2, (lienzo - alto) // 2), imagen)
+    if lado and lienzo != lado:
+        salida = salida.resize((lado, lado), Image.LANCZOS)
+    return salida
+
+
 def _imagen_icono_ventana():
     """
-    Icono simple para barras de título: engranaje + llave, sin logos de terceros
-    (ni remolino Debian, ni círculo Ubuntu, ni texto del cartel).
+    Preferir el logo del programa; si no existe, engranaje + llave dibujado.
     """
+    for ruta in (RUTA_ICONO, RUTA_LOGO):
+        if os.path.isfile(ruta):
+            try:
+                return _imagen_cuadrada_desde_archivo(ruta, 128)
+            except OSError:
+                continue
+    return _imagen_icono_procedural()
+
+
+def _imagen_icono_procedural():
+    """Engranaje + llave de respaldo si faltan los PNG del proyecto."""
     import math
     from PIL import Image, ImageDraw
 
@@ -71,8 +96,8 @@ def _imagen_icono_ventana():
     return imagen
 
 
-def preparar_ventana_app(ventana, tamano=128):
-    """Clase WM e icono limpio para barras de título y dock."""
+def preparar_ventana_app(ventana, tamano=128, estilo_dialogo=None):
+    """Clase WM, icono y (en Toplevel) chrome con franja al estilo Manten1d0."""
     try:
         ventana.tk.call("wm", "class", ".", CLASE_VENTANA, CLASE_VENTANA)
     except Exception:
@@ -83,38 +108,77 @@ def preparar_ventana_app(ventana, tamano=128):
     try:
         from PIL import Image, ImageTk
     except ImportError:
-        return
-    try:
-        emblema = _imagen_icono_ventana()
-        fotos = []
-        for lado in (16, 32, 48, 64, max(64, int(tamano))):
-            copia = emblema.copy()
-            copia.thumbnail((lado, lado), Image.LANCZOS)
-            foto = ImageTk.PhotoImage(copia, master=ventana)
-            fotos.append(foto)
-        # Varios tamaños: el gestor de ventanas elige el adecuado
-        ventana.iconphoto(True, *fotos)
-        ventana._icono_manten1d0 = fotos
-        _ICONOS_FOTO.extend(fotos)
-    except Exception:
-        return
+        emblema = None
+    else:
+        emblema = None
+        try:
+            emblema = _imagen_icono_ventana()
+            fotos = []
+            for lado in (16, 32, 48, 64, max(64, int(tamano))):
+                copia = emblema.copy()
+                copia.thumbnail((lado, lado), Image.LANCZOS)
+                foto = ImageTk.PhotoImage(copia, master=ventana)
+                fotos.append(foto)
+            ventana.iconphoto(True, *fotos)
+            ventana._icono_manten1d0 = fotos
+            _ICONOS_FOTO.extend(fotos)
+        except Exception:
+            pass
+
+    if estilo_dialogo is None:
+        # Tras el parche, tk.Toplevel es una funcion: detectar por nombre de clase
+        estilo_dialogo = type(ventana).__name__ == "Toplevel"
+    if estilo_dialogo:
+        try:
+            import dialogo_estilo as estilo
+
+            estilo.aplicar_chrome_toplevel(ventana)
+        except Exception:
+            pass
+    else:
+        try:
+            import preferencias
+
+            preferencias.aplicar_defaults_tema(ventana)
+        except Exception:
+            pass
 
 
 def instalar_icono_en_toplevels():
-    """Hace que todo tk.Toplevel nuevo lleve el mismo icono (evita iconos por defecto raros)."""
+    """Icono + estilo de franja en todo Toplevel nuevo; dialogos messagebox unificados."""
     global _ICONO_PARCHE_TOPLEVEL
     if _ICONO_PARCHE_TOPLEVEL:
         return
     import tkinter as tk
 
     original = tk.Toplevel
+    estilo_mod = None
+    try:
+        import dialogo_estilo as estilo_mod
+
+        estilo_mod.instalar_messagebox_estilo()
+    except Exception:
+        estilo_mod = None
 
     def toplevel_con_icono(*args, **kwargs):
+        # chrome=False: ventanas sin franja (tooltips, popups ligeros)
+        con_chrome = kwargs.pop("chrome", True)
         ventana = original(*args, **kwargs)
+        if not con_chrome:
+            return ventana
         try:
-            preparar_ventana_app(ventana, tamano=64)
+            preparar_ventana_app(ventana, tamano=64, estilo_dialogo=True)
         except Exception:
             pass
+        # Devolver el panel de contenido (expandible) para que pack/grid
+        # de las apps rellene la ventana bajo la franja.
+        if estilo_mod is not None:
+            try:
+                contenedor = getattr(ventana, "_contenedor_estilo", None)
+                if contenedor is not None:
+                    return estilo_mod.enganchar_cuerpo_toplevel(contenedor, ventana)
+            except Exception:
+                pass
         return ventana
 
     tk.Toplevel = toplevel_con_icono
@@ -140,6 +204,58 @@ def _emitir(comando):
     sys.stdout.flush()
 
 
+def _ruta_icono_cache_bandeja():
+    """PNG cuadrado en cache/tema local: AppIndicator/GNOME lo cargan mejor desde archivo."""
+    rutas_destino = []
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "Manten1d0")
+    tema_dir = os.path.join(
+        os.path.expanduser("~"), ".local", "share", "icons", "hicolor", "48x48", "apps"
+    )
+    for carpeta in (cache_dir, tema_dir):
+        try:
+            os.makedirs(carpeta, exist_ok=True)
+            rutas_destino.append(carpeta)
+        except OSError:
+            continue
+    if not rutas_destino:
+        rutas_destino.append(os.path.dirname(RUTA_ESTE))
+
+    try:
+        from PIL import Image
+
+        emblema = _imagen_icono_ventana()
+    except (OSError, ImportError):
+        emblema = None
+
+    cache_png = os.path.join(rutas_destino[0], "bandeja-icono.png")
+    tema_png = os.path.join(
+        os.path.expanduser("~"),
+        ".local",
+        "share",
+        "icons",
+        "hicolor",
+        "48x48",
+        "apps",
+        "manten1d0.png",
+    )
+    if emblema is not None:
+        try:
+            emblema.save(cache_png, format="PNG")
+        except OSError:
+            cache_png = RUTA_ICONO if os.path.isfile(RUTA_ICONO) else None
+        try:
+            emblema.resize((48, 48), Image.LANCZOS).save(tema_png, format="PNG")
+        except OSError:
+            pass
+        return cache_png or (RUTA_ICONO if os.path.isfile(RUTA_ICONO) else RUTA_LOGO)
+
+    if os.path.isfile(RUTA_ICONO):
+        return RUTA_ICONO
+    if os.path.isfile(RUTA_LOGO):
+        return RUTA_LOGO
+    return None
+
+
 def _crear_icono_qt():
     import io
     from PyQt5.QtGui import QIcon, QPixmap
@@ -148,21 +264,48 @@ def _crear_icono_qt():
     try:
         from PIL import Image
     except ImportError:
-        pixmap = QPixmap(RUTA_ICONO)
-        if pixmap.isNull():
-            return None
-        return QIcon(pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        Image = None
 
-    try:
-        emblema = _imagen_icono_ventana()
-    except OSError:
+    ruta_cache = _ruta_icono_cache_bandeja()
+    icono = QIcon.fromTheme("manten1d0")
+
+    # Preferir archivo en disco (StatusNotifier / AppIndicator)
+    if ruta_cache and os.path.isfile(ruta_cache):
+        if icono.isNull():
+            icono = QIcon()
+        icono.addFile(ruta_cache)
+        pixmap = QPixmap(ruta_cache)
+        if not pixmap.isNull():
+            for lado in (16, 22, 24, 32, 48, 64):
+                icono.addPixmap(
+                    pixmap.scaled(lado, lado, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+
+    if (icono.isNull() or not icono.availableSizes()) and Image is not None:
+        try:
+            emblema = _imagen_icono_ventana()
+            if icono.isNull():
+                icono = QIcon()
+            for lado in (16, 22, 24, 32, 48, 64, 128):
+                copia = emblema.copy()
+                copia.thumbnail((lado, lado), Image.LANCZOS)
+                buffer = io.BytesIO()
+                copia.save(buffer, format="PNG")
+                pix = QPixmap()
+                pix.loadFromData(buffer.getvalue())
+                if not pix.isNull():
+                    icono.addPixmap(pix)
+        except OSError:
+            pass
+
+    if icono.isNull():
+        for ruta in (RUTA_ICONO, RUTA_LOGO):
+            if os.path.isfile(ruta):
+                pixmap = QPixmap(ruta)
+                if not pixmap.isNull():
+                    return QIcon(pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         return None
-    fondo = emblema.resize((64, 64), Image.LANCZOS)
-    buffer = io.BytesIO()
-    fondo.save(buffer, format="PNG")
-    pixmap = QPixmap()
-    pixmap.loadFromData(buffer.getvalue())
-    return QIcon(pixmap)
+    return icono
 
 
 def _ejecutar_hijo():
@@ -174,6 +317,8 @@ def _ejecutar_hijo():
     )
 
     app = QApplication(sys.argv)
+    app.setApplicationName("Manten1d0")
+    app.setOrganizationName("Manten1d0")
     app.setQuitOnLastWindowClosed(False)
     if not QSystemTrayIcon.isSystemTrayAvailable():
         return 1
@@ -181,9 +326,12 @@ def _ejecutar_hijo():
     icono = _crear_icono_qt()
     if icono is None or icono.isNull():
         return 1
+    app.setWindowIcon(icono)
 
     titular = QWidget()
+    titular.setWindowIcon(icono)
     bandeja = QSystemTrayIcon(icono, titular)
+    bandeja.setIcon(icono)
     bandeja.setToolTip("Manten1d0")
 
     menu = QMenu(titular)
@@ -279,7 +427,9 @@ class BandejaSistema:
 
     def _en_tk(self, comando):
         try:
-            self.root.after(0, comando)
+            from registro import programar_ui
+
+            programar_ui(self.root, comando)
         except Exception:
             pass
 

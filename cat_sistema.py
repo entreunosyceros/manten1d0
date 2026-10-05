@@ -18,7 +18,7 @@ import subprocess
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from placeholder import entradaConPlaceHolder
-from registro import registrar, registrar_comando, sudo_shell
+from registro import en_hilo, programar_ui, registrar, registrar_comando, sudo_shell, sudo_run
 
 # Clase para generar la ventana de barra de progreso
 class ProgresoVentana(tk.Toplevel):
@@ -251,8 +251,30 @@ class AdministrarProcesos:
         self.root = root
         self.root.title("Administrar Procesos")
         self.column_sort_order = {}  # Diccionario para guardar el orden de clasificación de las columnas
-        
-        self.tree = ttk.Treeview(self.root, columns=("PID", "Nombre", "Uso de CPU"))
+
+        # Opciones arriba; lista de procesos rellena el resto al redimensionar
+        marco_opciones = tk.Frame(self.root)
+        marco_opciones.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(8, 4))
+
+        bold_font = font.Font(weight="bold")
+        tk.Label(marco_opciones, text="Opciones", font=bold_font).pack(anchor="w")
+
+        self.search_entry_var = tk.StringVar()
+        self.search_entry_var.set("Buscar por nombre o PID")
+        self.search_entry = tk.Entry(marco_opciones, textvariable=self.search_entry_var, fg="grey")
+        self.search_entry.pack(fill=tk.X, pady=(4, 4))
+        self.search_entry.bind("<FocusIn>", self.on_entry_focus_in)
+        self.search_entry.bind("<FocusOut>", self.on_entry_focus_out)
+        self.search_entry.bind("<KeyRelease>", self.filter_processes)
+
+        self.close_button = tk.Button(marco_opciones, text="Cerrar Proceso", command=self.close_process)
+        self.close_button.pack(anchor="w")
+        ToolTip(self.close_button, "Termina el proceso seleccionado. Úsalo con precaución")
+
+        marco_lista = tk.Frame(self.root)
+        marco_lista.pack(side=tk.TOP, expand=True, fill=tk.BOTH, padx=8, pady=(4, 8))
+
+        self.tree = ttk.Treeview(marco_lista, columns=("PID", "Nombre", "Uso de CPU"))
         self.tree.heading("#0", text="", anchor=tk.W)
         self.tree.heading("#1", text="PID", anchor=tk.W, command=lambda: self.sort_column("#1"))
         self.tree.heading("#2", text="Nombre", anchor=tk.W, command=lambda: self.sort_column("#2"))
@@ -261,34 +283,12 @@ class AdministrarProcesos:
         self.tree.column("#1", stretch=tk.YES, width=100)
         self.tree.column("#2", stretch=tk.YES, width=200)
         self.tree.column("#3", stretch=tk.YES, width=100)
-        self.tree.pack(expand=True, fill=tk.BOTH)
-        
-        self.scrollbar = ttk.Scrollbar(self.root, orient=tk.VERTICAL, command=self.tree.yview)
+
+        self.scrollbar = ttk.Scrollbar(marco_lista, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=self.scrollbar.set)
-        
-        self.tree.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)  # Mover el árbol a la izquierda
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)  # Colocar la barra de desplazamiento a la derecha
+        self.tree.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Crear una fuente en negrita
-        bold_font = font.Font(weight="bold")
-
-        # Crear la etiqueta con el texto "Opciones" en negrita
-        label = tk.Label(self.root, text="Opciones", font=bold_font)
-        label.pack(side=tk.TOP, pady=(0, 5))  # Ajustar el relleno superior según sea necesario
-
-        
-        self.search_entry_var = tk.StringVar()
-        self.search_entry_var.set("Buscar por nombre o PID")
-        self.search_entry = tk.Entry(self.root, textvariable=self.search_entry_var, fg="grey")
-        self.search_entry.pack(side=tk.TOP, fill=tk.X)
-        self.search_entry.bind("<FocusIn>", self.on_entry_focus_in)
-        self.search_entry.bind("<FocusOut>", self.on_entry_focus_out)
-        self.search_entry.bind("<KeyRelease>", self.filter_processes)
-        
-        self.close_button = tk.Button(self.root, text="Cerrar Proceso", command=self.close_process)
-        self.close_button.pack(side=tk.TOP)
-        ToolTip(self.close_button, "Termina el proceso seleccionado. Úsalo con precaución")
-        
         self.load_processes()
 
         # Iniciar la actualización periódica de los procesos
@@ -360,7 +360,13 @@ class AdministrarProcesos:
         try:
             process = psutil.Process(pid)
             cpu_percent = process.cpu_percent(interval=0.5)
-            self.root.after(100, self.update_tree, pid, f"{cpu_percent:.2f}%")
+            texto = f"{cpu_percent:.2f}%"
+
+            def actualizar():
+                if self.tree.winfo_exists():
+                    self.update_tree(pid, texto)
+
+            programar_ui(self.root, actualizar)
         except psutil.NoSuchProcess:
             pass
         except Exception as e:
@@ -1232,11 +1238,191 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox
 import os
 
+
+_MAX_LINEAS_LOG = 2000
+_UMBRAL_KB_LOG = 256  # Por encima, solo tail (no cargar syslog entero)
+
+
+def _aviso_log_recortado(lineas, tamano_bytes=None):
+    if tamano_bytes is not None:
+        return (
+            f"(Mostrando las últimas {lineas} líneas; "
+            f"tamaño total {max(1, tamano_bytes // 1024)} KiB.)\n\n"
+        )
+    return f"(Mostrando las últimas {lineas} líneas.)\n\n"
+
+
+def _recortar_lineas(texto, lineas=_MAX_LINEAS_LOG):
+    if not texto:
+        return ""
+    partes = texto.splitlines()
+    if len(partes) <= lineas:
+        return texto
+    return _aviso_log_recortado(lineas) + "\n".join(partes[-lineas:])
+
+
+def _tail_archivo(ruta, lineas=_MAX_LINEAS_LOG, sudo=False):
+    args = ["tail", "-n", str(lineas), "--", ruta]
+    if sudo:
+        resultado = sudo_run(
+            args,
+            f"Leer final de {os.path.basename(ruta)}",
+            timeout=90,
+        )
+        if resultado is None:
+            raise PermissionError("Operación cancelada")
+        if resultado.returncode != 0:
+            detalle = (resultado.stderr or resultado.stdout or "Permiso denegado").strip()
+            raise PermissionError(detalle)
+        return resultado.stdout or ""
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as error:
+        raise PermissionError(str(error)) from error
+    if proc.returncode != 0:
+        raise PermissionError((proc.stderr or proc.stdout or "No se pudo leer el log").strip())
+    return proc.stdout or ""
+
+
+def _leer_contenido_log(ruta_log, clave_log=None):
+    """Lee un log del sistema; archivos grandes solo al final (tail)."""
+    _LOGS_BINARIOS = {"btmp", "faillog", "lastlog"}
+    if clave_log in _LOGS_BINARIOS:
+        return (
+            "Este log es binario y no se puede mostrar como texto aquí.\n\n"
+            "En terminal puedes usar: last, lastb o faillog (según el caso)."
+        )
+
+    if clave_log == "dmesg":
+        resultado = sudo_run(["dmesg", "--ctime"], "Leer mensajes del kernel (dmesg)", timeout=90)
+        if resultado is None:
+            raise PermissionError("Operación cancelada")
+        if resultado.returncode != 0:
+            resultado = sudo_run(["dmesg"], "Leer mensajes del kernel (dmesg)", timeout=90)
+        if resultado is None:
+            raise PermissionError("Operación cancelada")
+        if resultado.returncode != 0:
+            detalle = (resultado.stderr or resultado.stdout or "Permiso denegado").strip()
+            raise PermissionError(detalle)
+        return _recortar_lineas(resultado.stdout or "")
+
+    if not ruta_log:
+        raise FileNotFoundError("Ruta de log no definida")
+    if not os.path.exists(ruta_log):
+        raise FileNotFoundError(ruta_log)
+
+    try:
+        tamano = os.path.getsize(ruta_log)
+    except OSError:
+        tamano = 0
+
+    grande = tamano > _UMBRAL_KB_LOG * 1024
+
+    if grande:
+        try:
+            cuerpo = _tail_archivo(ruta_log, sudo=False)
+        except PermissionError:
+            cuerpo = _tail_archivo(ruta_log, sudo=True)
+        return _aviso_log_recortado(_MAX_LINEAS_LOG, tamano) + cuerpo
+
+    if os.path.isfile(ruta_log):
+        try:
+            with open(ruta_log, "r", encoding="utf-8", errors="replace") as archivo:
+                return archivo.read()
+        except PermissionError:
+            pass
+
+    resultado = sudo_run(
+        ["cat", "--", ruta_log],
+        f"Leer log {os.path.basename(ruta_log)}",
+        timeout=90,
+    )
+    if resultado is None:
+        raise PermissionError("Operación cancelada")
+    if resultado.returncode != 0:
+        cuerpo = _tail_archivo(ruta_log, sudo=True)
+        return cuerpo
+    return resultado.stdout or ""
+
+
 class consultaLogs:
     def __init__(self, master):
         self.master = master
+        self._tip_log_ventana = None
+        self._tip_log_after = None
+        self._tip_log_indice = None
+        self._log_peticion = 0
+        self._log_cargando = False
         self.mostrar_logs()
-        self.current_tooltip = None  # Añadimos un atributo para rastrear el tooltip actual
+
+    def _ocultar_tip_lista(self, logs_list):
+        if self._tip_log_after is not None:
+            try:
+                logs_list.after_cancel(self._tip_log_after)
+            except tk.TclError:
+                pass
+            self._tip_log_after = None
+        if self._tip_log_ventana is not None:
+            try:
+                self._tip_log_ventana.destroy()
+            except tk.TclError:
+                pass
+            self._tip_log_ventana = None
+        self._tip_log_indice = None
+
+    def _mostrar_tip_lista(self, logs_list, log_tooltips, event):
+        if getattr(self, "_log_cargando", False):
+            self._ocultar_tip_lista(logs_list)
+            return
+        indice = logs_list.nearest(event.y)
+        if indice < 0:
+            self._ocultar_tip_lista(logs_list)
+            return
+        if indice == self._tip_log_indice and self._tip_log_ventana is not None:
+            return
+        self._ocultar_tip_lista(logs_list)
+        indice_objetivo = indice
+
+        def mostrar(idx=indice_objetivo, y=event.y):
+            self._tip_log_after = None
+            if not logs_list.winfo_exists():
+                return
+            if idx < 0 or idx >= logs_list.size():
+                return
+            texto = log_tooltips.get(logs_list.get(idx), "")
+            if not texto:
+                return
+            self._tip_log_indice = idx
+            try:
+                ventana = tk.Toplevel(logs_list, chrome=False)
+            except (TypeError, tk.TclError):
+                ventana = tk.Toplevel(logs_list)
+            ventana.wm_overrideredirect(True)
+            x = logs_list.winfo_rootx() + logs_list.winfo_width() + 4
+            y = logs_list.winfo_rooty() + y
+            ventana.wm_geometry(f"+{x}+{y}")
+            try:
+                ventana.attributes("-topmost", True)
+            except tk.TclError:
+                pass
+            tk.Label(
+                ventana,
+                text=texto,
+                bg="#ffffe0",
+                fg="#000000",
+                relief="solid",
+                borderwidth=1,
+                justify=tk.LEFT,
+                wraplength=280,
+            ).pack(ipadx=6, ipady=3)
+            self._tip_log_ventana = ventana
+
+        self._tip_log_after = logs_list.after(350, mostrar)
 
     def mostrar_logs(self):
         self.master.title("Logs Del Sistema")
@@ -1302,32 +1488,59 @@ class consultaLogs:
             if seleccion:
                 log_seleccionado = logs_list.get(seleccion[0])
                 ruta_log = log_files.get(log_seleccionado)
-                if ruta_log:
-                    try:
-                        with open(ruta_log, 'r') as file:
-                            contenido = file.read()
-                            logs_text.delete(1.0, tk.END)
-                            logs_text.insert(tk.INSERT, contenido)
-                    except PermissionError:
-                        messagebox.showerror("Error", f"No se pudo abrir el archivo de log seleccionado: {log_seleccionado}. Permiso denegado.")
-                    except Exception as e:
-                        messagebox.showerror("Error", f"No se pudo abrir el archivo de log seleccionado: {log_seleccionado}. Error: {str(e)}")
+                if ruta_log or log_seleccionado == "dmesg":
+                    self._ocultar_tip_lista(logs_list)
+                    self._log_cargando = True
+                    self._log_peticion += 1
+                    peticion = self._log_peticion
+                    logs_text.delete(1.0, tk.END)
+                    logs_text.insert(
+                        tk.INSERT,
+                        "Leyendo log (solo las últimas líneas si el archivo es grande)...",
+                    )
 
-        def mostrar_tooltip(event):
-            if self.current_tooltip:  # Si hay un tooltip activo, destrúyelo
-                self.current_tooltip.hide_tooltip()
-            seleccion = logs_list.nearest(event.y)
-            if seleccion >= 0:
-                log_seleccionado = logs_list.get(seleccion)
-                tooltip_text = log_tooltips.get(log_seleccionado, "")
-                self.current_tooltip = ToolTip(logs_list, tooltip_text)
-                self.current_tooltip.show_tooltip(event)
+                    def al_terminar(contenido):
+                        self._log_cargando = False
+                        if peticion != self._log_peticion or not logs_text.winfo_exists():
+                            return
+                        logs_text.delete(1.0, tk.END)
+                        logs_text.insert(tk.INSERT, contenido)
 
-        def ocultar_tooltip(event):
-            if self.current_tooltip:
-                self.current_tooltip.hide_tooltip()
-                self.current_tooltip = None
+                    def al_error(error):
+                        self._log_cargando = False
+                        if peticion != self._log_peticion or not logs_text.winfo_exists():
+                            return
+                        logs_text.delete(1.0, tk.END)
+                        if isinstance(error, FileNotFoundError):
+                            messagebox.showerror(
+                                "Error",
+                                f"No se encontró el archivo de log: {log_seleccionado}.",
+                                parent=self.master,
+                            )
+                        elif isinstance(error, PermissionError):
+                            messagebox.showerror(
+                                "Error",
+                                f"No se pudo abrir el log «{log_seleccionado}».\n\n{error}",
+                                parent=self.master,
+                            )
+                        else:
+                            messagebox.showerror(
+                                "Error",
+                                f"No se pudo abrir el log «{log_seleccionado}».\n{error}",
+                                parent=self.master,
+                            )
 
-        logs_list.bind('<<ListboxSelect>>', mostrar_contenido_log)
-        logs_list.bind("<Motion>", mostrar_tooltip)
-        logs_list.bind("<Leave>", ocultar_tooltip)
+                    en_hilo(
+                        self.master,
+                        lambda: _leer_contenido_log(ruta_log, log_seleccionado),
+                        al_terminar=al_terminar,
+                        al_error=al_error,
+                    )
+
+        logs_list.bind("<<ListboxSelect>>", mostrar_contenido_log)
+        logs_list.bind(
+            "<Motion>",
+            lambda e: self._mostrar_tip_lista(logs_list, log_tooltips, e),
+        )
+        logs_list.bind("<Leave>", lambda _e: self._ocultar_tip_lista(logs_list))
+        self.master.bind("<Destroy>", lambda _e: self._ocultar_tip_lista(logs_list), add="+")

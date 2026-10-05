@@ -48,7 +48,7 @@ from password import limpiar_archivos_configuracion, obtener_contrasena
 from dependencias import instalar_dependencias, resumen_dependencias_faltantes
 from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, internet_cat, navegadores_cat, perfil_cat, red_local_cat, sistema_cat, notas_cat, inicio_cat
 import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
-from registro import mostrar_registro
+from registro import mostrar_registro, vincular_bombeo_ui, detener_bombeo_ui
 from bandeja import BandejaSistema, preparar_ventana_app, instalar_icono_en_toplevels, CLASE_VENTANA
 from cat_vpn import vpn_en_uso
 from tooltip import ToolTip
@@ -58,11 +58,81 @@ from password import limpiar_archivos_configuracion, obtener_contrasena
 from dependencias import instalar_dependencias, resumen_dependencias_faltantes
 from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, internet_cat, navegadores_cat, perfil_cat, red_local_cat, sistema_cat, notas_cat, inicio_cat
 import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
-from registro import mostrar_registro
+from registro import mostrar_registro, vincular_bombeo_ui, detener_bombeo_ui
 from bandeja import BandejaSistema, preparar_ventana_app, instalar_icono_en_toplevels, CLASE_VENTANA
 from cat_vpn import vpn_en_uso
 from tooltip import ToolTip
 import dialogo_estilo as estilo
+
+RUTA_LOGO_SPLASH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
+
+
+def mostrar_splash(duracion_ms=3000):
+    """Pantalla de arranque centrada con el logo; como maximo 3 segundos."""
+    splash = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
+    splash.withdraw()
+    splash.overrideredirect(True)
+    try:
+        splash.attributes("-topmost", True)
+    except tk.TclError:
+        pass
+
+    fondo = "#2c2c2c"
+    marco = tk.Frame(splash, bg=fondo, padx=28, pady=28)
+    marco.pack(fill=tk.BOTH, expand=True)
+
+    foto = None
+    try:
+        from PIL import Image, ImageTk
+
+        imagen = Image.open(RUTA_LOGO_SPLASH)
+        imagen.thumbnail((360, 360), Image.LANCZOS)
+        foto = ImageTk.PhotoImage(imagen, master=splash)
+        lbl = tk.Label(marco, image=foto, bg=fondo)
+        lbl.image = foto
+        lbl.pack()
+    except Exception:
+        lbl = tk.Label(
+            marco,
+            text="Manten1d0",
+            font=("Arial", 28, "bold"),
+            bg=fondo,
+            fg="#ffffff",
+        )
+        lbl.pack(pady=40)
+
+    tk.Label(
+        marco,
+        text="Cargando...",
+        font=("Arial", 11),
+        bg=fondo,
+        fg="#cccccc",
+    ).pack(pady=(12, 0))
+
+    splash.update_idletasks()
+    ancho = max(splash.winfo_reqwidth(), 320)
+    alto = max(splash.winfo_reqheight(), 280)
+    x = max(0, (splash.winfo_screenwidth() - ancho) // 2)
+    y = max(0, (splash.winfo_screenheight() - alto) // 2)
+    splash.geometry(f"{ancho}x{alto}+{x}+{y}")
+    splash.deiconify()
+    splash.lift()
+
+    cerrado = {"ok": False}
+
+    def cerrar(_event=None):
+        if cerrado["ok"]:
+            return
+        cerrado["ok"] = True
+        try:
+            splash.destroy()
+        except tk.TclError:
+            pass
+
+    splash.bind("<Button-1>", cerrar)
+    splash.bind("<Escape>", cerrar)
+    splash.after(max(500, min(int(duracion_ms), 3000)), cerrar)
+    splash.mainloop()
 
 
 def instalar_dependencias_con_progreso(parent):
@@ -105,14 +175,16 @@ def instalar_dependencias_con_progreso(parent):
             progress_window.destroy()
 
     def trabajador():
+        from registro import programar_ui
+
         ok, error = instalar_dependencias(
-            on_progress=lambda valor, texto="": parent.after(
-                0, lambda v=valor, t=texto: actualizar_progreso(v, t)
+            on_progress=lambda valor, texto="": programar_ui(
+                parent, actualizar_progreso, valor, texto
             )
         )
         resultado["ok"] = ok
         resultado["error"] = error
-        parent.after(0, finalizar)
+        programar_ui(parent, finalizar)
 
     threading.Thread(target=trabajador, daemon=True).start()
     parent.wait_window(progress_window)
@@ -122,10 +194,12 @@ def instalar_dependencias_con_progreso(parent):
 def main():
     print(f"Ejecutando programa con: {sys.executable}")
 
+    mostrar_splash(3000)
     obtener_contrasena()
 
     root = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
     preparar_ventana_app(root)
+    vincular_bombeo_ui(root)
     instalar_icono_en_toplevels()
 
     cuerpo = estilo.preparar_dialogo(
@@ -185,6 +259,7 @@ def verificar_dependencias_con_progreso(root, progress_bar, label):
                     ancho=480,
                     alto=300,
                 )
+                detener_bombeo_ui()
                 root.destroy()
                 return
             verificar_dependencias_con_progreso(root, progress_bar, label)
@@ -198,6 +273,7 @@ def verificar_dependencias_con_progreso(root, progress_bar, label):
                 botones=(("Cerrar", True),),
                 color_franja=estilo.FRANJA_AVISO,
             )
+            detener_bombeo_ui()
             root.destroy()
     else:
         close_progress(root, progress_bar, label)
@@ -220,10 +296,16 @@ def close_progress(root, progress_bar, label):
         ancho=460,
         alto=240,
     )
-    root.destroy()
+    # Parar after() del bombeo antes de destruir esta raíz temporal
+    detener_bombeo_ui()
+    try:
+        root.destroy()
+    except tk.TclError:
+        pass
     # Crear la ventana principal
     main_window = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
-    preparar_ventana_app(main_window)
+    preparar_ventana_app(main_window, estilo_dialogo=True)
+    vincular_bombeo_ui(main_window)
     instalar_icono_en_toplevels()
     VentanaPrincipal(main_window)
     main_window.mainloop()
@@ -243,7 +325,14 @@ class VentanaPrincipal:
         self._bandeja = None
 
         self._categoria_activa = None
+        # Contenedor bajo la franja (mismo chrome que las ventanas secundarias)
+        self.cuerpo = estilo.panel_contenido(self.root)
+        try:
+            self.cuerpo.configure(bg=preferencias.color_fondo())
+        except tk.TclError:
+            pass
         self.root.config(bg=preferencias.color_fondo())
+        preferencias.aplicar_defaults_tema(self.root)
         
 ##############################################################FUNCIONES PARA MENÚ SUPERIOR##########################################################
 
@@ -330,14 +419,71 @@ class VentanaPrincipal:
         def menu_lateral():
             barra = preferencias.color_barra()
             texto = preferencias.color_texto()
-            self.menu_lateral = tk.Frame(self.root, width=220, bg=barra)
+            campo = preferencias.color_campo()
+            self.menu_lateral = tk.Frame(self.cuerpo, width=220, bg=barra)
             self.menu_lateral._zona = "barra"
             self.menu_lateral.pack(side="left", fill="y")
             self.menu_lateral.pack_propagate(False)
 
+            # Buscador de herramientas (parte superior de la barra)
+            marco_busqueda = tk.Frame(self.menu_lateral, bg=barra)
+            marco_busqueda._zona = "barra"
+            marco_busqueda.pack(side="top", fill="x", padx=8, pady=(10, 4))
+            tk.Label(
+                marco_busqueda,
+                text="Buscar",
+                bg=barra,
+                fg=texto,
+                font=preferencias.fuente_ui(9),
+                anchor="w",
+            ).pack(fill="x")
+            self.var_busqueda = tk.StringVar()
+            self.entry_busqueda = tk.Entry(
+                marco_busqueda,
+                textvariable=self.var_busqueda,
+                font=preferencias.fuente_ui(10),
+                bg=campo,
+                fg=texto,
+                insertbackground=texto,
+                relief="flat",
+                highlightthickness=1,
+                highlightbackground=preferencias.color_borde(),
+                highlightcolor=preferencias.color_borde(),
+            )
+            self.entry_busqueda._zona = "barra"
+            self.entry_busqueda.pack(fill="x", pady=(2, 0), ipady=3)
+            ToolTip(
+                self.entry_busqueda,
+                "Escribe el nombre de una herramienta (por ejemplo: procesos, Wi-Fi, limpiar)",
+            )
+            self.var_busqueda.trace_add("write", lambda *_: self._actualizar_busqueda_herramientas())
+            self.entry_busqueda.bind("<Return>", lambda _e: self._activar_resultado_busqueda())
+            self.entry_busqueda.bind("<Down>", lambda _e: self._enfocar_lista_busqueda())
+            self.entry_busqueda.bind("<Escape>", lambda _e: self._limpiar_busqueda_herramientas())
+
+            self.lista_busqueda = tk.Listbox(
+                self.menu_lateral,
+                font=preferencias.fuente_ui(9),
+                bg=campo,
+                fg=texto,
+                selectbackground=preferencias.colores_de(preferencias.tema_seleccionado)["select"],
+                selectforeground=preferencias.colores_de(preferencias.tema_seleccionado)["select_fg"],
+                activestyle="none",
+                highlightthickness=0,
+                borderwidth=0,
+                exportselection=False,
+            )
+            self.lista_busqueda._zona = "barra"
+            self.lista_busqueda.bind("<Double-Button-1>", lambda _e: self._activar_resultado_busqueda())
+            self.lista_busqueda.bind("<Return>", lambda _e: self._activar_resultado_busqueda())
+            self.lista_busqueda.bind("<Escape>", lambda _e: self._limpiar_busqueda_herramientas())
+            self._resultados_busqueda = []
+            self._catalogo_herramientas = None
+
             marco_nav = tk.Frame(self.menu_lateral, bg=barra)
             marco_nav._zona = "barra"
-            marco_nav.pack(side="top", fill="both", expand=True, padx=8, pady=(12, 0))
+            marco_nav.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 0))
+            self.marco_nav_categorias = marco_nav
 
             self.categorias = [
                 "Inicio",
@@ -366,7 +512,7 @@ class VentanaPrincipal:
                     pady=6,
                     bg=barra,
                     fg=texto,
-                    activebackground=preferencias.color_barra_activa(),
+                    activebackground=preferencias.color_hover(),
                     activeforeground=texto,
                     font=preferencias.fuente_ui(11),
                     cursor="hand2",
@@ -376,7 +522,11 @@ class VentanaPrincipal:
                 boton._nav_activa = False
                 boton.pack(fill="x", pady=2)
                 ToolTip(boton, f"Categoría {categoria} (Alt+{tecla})")
-                preferencias.aplicar_hover(boton)
+                preferencias.aplicar_hover(
+                    boton,
+                    fondo_normal=barra,
+                    fondo_hover=preferencias.color_hover(),
+                )
                 self.botones_categorias.append(boton)
                 self.root.bind_all(
                     f"<Alt-Key-{tecla}>",
@@ -449,7 +599,7 @@ class VentanaPrincipal:
 ############################################################################################################################################        
         
         # Crear el área central para mostrar subcategorías
-        self.area_central = tk.Frame(self.root, bg=preferencias.color_fondo(), borderwidth=0)
+        self.area_central = tk.Frame(self.cuerpo, bg=preferencias.color_fondo(), borderwidth=0)
         self.area_central.pack(side="top", fill="both", expand=True)
 
         self.label_bienvenida = tk.Label(
@@ -481,7 +631,7 @@ class VentanaPrincipal:
         self.label_subcategorias.pack()
 
         # Crear el contenedor para el widget Text y la barra de desplazamiento para mostrar la categoría Información
-        self.contenedor_texto = tk.Frame(self.root)
+        self.contenedor_texto = tk.Frame(self.cuerpo, bg=preferencias.color_fondo())
         # Contenedor Deshabilitado al inicio
         self.contenedor_texto.pack_forget()
 
@@ -515,6 +665,7 @@ class VentanaPrincipal:
 
         # Llenar el área de texto con la información inicial
         self.mostrar_informacion_sistema()
+        preferencias.cambiar_tema(self.root, preferencias.tema_seleccionado)
         self.root.after(200, lambda: self.mostrar_subcategorias("Inicio"))
         self.root.after(
             400,
@@ -595,16 +746,86 @@ class VentanaPrincipal:
     def _marcar_categoria(self, categoria):
         """Deja visible qué sección del menú lateral está abierta."""
         self._categoria_activa = categoria
+        hover = preferencias.color_hover()
         for boton in self.botones_categorias:
             activa = getattr(boton, "_nav", None) == categoria
             boton._nav_activa = activa
             fondo = preferencias.color_barra_activa() if activa else preferencias.color_barra()
+            boton._hover_fondo = preferencias.color_barra()
+            boton._hover_sobre = hover
             boton.config(
                 background=fondo,
                 foreground=preferencias.color_texto(),
-                activebackground=fondo,
+                activebackground=hover,
                 activeforeground=preferencias.color_texto(),
                 font=preferencias.fuente_ui(11, "bold" if activa else "normal"),
+            )
+
+    def _obtener_catalogo_herramientas(self):
+        if self._catalogo_herramientas is None:
+            from catalogo_herramientas import construir_catalogo
+
+            self._catalogo_herramientas = construir_catalogo(self)
+        return self._catalogo_herramientas
+
+    def _limpiar_busqueda_herramientas(self):
+        try:
+            self.var_busqueda.set("")
+        except Exception:
+            pass
+        self.entry_busqueda.focus_set()
+
+    def _actualizar_busqueda_herramientas(self):
+        from catalogo_herramientas import filtrar_catalogo
+
+        consulta = self.var_busqueda.get().strip()
+        self.lista_busqueda.delete(0, tk.END)
+        self._resultados_busqueda = []
+
+        if not consulta:
+            self.lista_busqueda.pack_forget()
+            if not self.marco_nav_categorias.winfo_ismapped():
+                self.marco_nav_categorias.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 0))
+            return
+
+        self.marco_nav_categorias.pack_forget()
+        resultados = filtrar_catalogo(self._obtener_catalogo_herramientas(), consulta)[:40]
+        self._resultados_busqueda = resultados
+        if not self.lista_busqueda.winfo_ismapped():
+            self.lista_busqueda.pack(side="top", fill="both", expand=True, padx=8, pady=(4, 0))
+
+        if not resultados:
+            self.lista_busqueda.insert(tk.END, "Sin resultados")
+            return
+        for item in resultados:
+            self.lista_busqueda.insert(tk.END, f"{item['nombre']}  ·  {item['categoria']}")
+        self.lista_busqueda.selection_clear(0, tk.END)
+        self.lista_busqueda.selection_set(0)
+        self.lista_busqueda.activate(0)
+
+    def _enfocar_lista_busqueda(self):
+        if self._resultados_busqueda and self.lista_busqueda.winfo_ismapped():
+            self.lista_busqueda.focus_set()
+            if not self.lista_busqueda.curselection():
+                self.lista_busqueda.selection_set(0)
+                self.lista_busqueda.activate(0)
+
+    def _activar_resultado_busqueda(self):
+        if not self._resultados_busqueda:
+            return
+        seleccion = self.lista_busqueda.curselection()
+        indice = seleccion[0] if seleccion else 0
+        if indice < 0 or indice >= len(self._resultados_busqueda):
+            return
+        item = self._resultados_busqueda[indice]
+        self._limpiar_busqueda_herramientas()
+        try:
+            item["abrir"]()
+        except Exception as error:
+            messagebox.showerror(
+                "Buscar herramientas",
+                f"No se pudo abrir «{item['nombre']}»:\n{error}",
+                parent=self.root,
             )
 
     # Función para mostrar la información del sistema dentro de la categoría información. Toma los datos de información.py
@@ -769,6 +990,7 @@ class VentanaPrincipal:
             self._bandeja.detener()
             self._bandeja = None
         limpiar_archivos_configuracion()
+        detener_bombeo_ui()
         self.root.destroy()
 
     def check_connection(self):
@@ -797,10 +1019,9 @@ class VentanaPrincipal:
                 self._ip_publica_cache = ""
                 self._ip_publica_momento = 0
                 estado = ("red", "Sin conexión", privada, "No disponible", vpn_texto, vpn_detalle)
-            try:
-                self.root.after(0, lambda e=estado: self._aplicar_estado_internet(*e))
-            except RuntimeError:
-                return
+            from registro import programar_ui
+
+            programar_ui(self.root, lambda e=estado: self._aplicar_estado_internet(*e))
 
         threading.Thread(target=trabajador, daemon=True).start()
 

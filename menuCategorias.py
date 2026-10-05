@@ -63,6 +63,7 @@ from centro_seguridad import CentroSeguridad
 from analisis_arranque import AnalisisArranque
 from monitor_recursos import MonitorRecursos
 from asistente_internet import AsistenteInternet
+from asistente_problemas import AsistenteProblemas
 
 COLORES_AVISO = {
     "error": ("#c0392b", "white"),
@@ -82,6 +83,7 @@ PANELES_DIAGNOSTICO = {
     "ActualizarTodo": ActualizarTodo,
     "InformeAsistencia": InformeAsistencia,
     "AsistenteInternet": AsistenteInternet,
+    "AsistenteProblemas": AsistenteProblemas,
 }
 
 RUTA_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
@@ -269,10 +271,21 @@ def inicio_cat(self, mensaje_personalizado=None):
 
         marco_botones = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
         marco_botones.pack(side=tk.BOTTOM, pady=12)
+        fila0 = tk.Frame(marco_botones, bg=preferencias.color_fondo())
+        fila0.pack()
         fila1 = tk.Frame(marco_botones, bg=preferencias.color_fondo())
-        fila1.pack()
+        fila1.pack(pady=(6, 0))
         fila2 = tk.Frame(marco_botones, bg=preferencias.color_fondo())
         fila2.pack(pady=(6, 0))
+        con_tooltip(
+            tk.Button(
+                fila0,
+                text="Que problema tienes?",
+                command=lambda: abrir_toplevel(AsistenteProblemas),
+                font=("Arial", 10, "bold"),
+            ),
+            "Asistente: elige Internet, sonido, impresora, espacio, arranque... y diagnostica solo eso",
+        ).pack(side=tk.LEFT, padx=6)
         con_tooltip(
             tk.Button(fila1, text="Analizar mi equipo", command=refrescar_checklist),
             "Vuelve a ejecutar el diagnóstico completo del equipo",
@@ -545,6 +558,7 @@ def _preparar_categoria(self, titulo, mensaje=None):
 
 def _boton_categoria(contenedor, colores, titulo, comando, ayuda):
     borde = colores.get("borde", colores.get("sidebar", colores["bg"]))
+    hover = colores.get("hover", colores["bg"])
     boton = tk.Button(
         contenedor,
         text=titulo,
@@ -556,7 +570,7 @@ def _boton_categoria(contenedor, colores, titulo, comando, ayuda):
         highlightcolor=borde,
         bg=colores["base"],
         fg=colores["fg"],
-        activebackground=colores.get("sidebar_activa", colores["bg"]),
+        activebackground=hover,
         activeforeground=colores["fg"],
         font=preferencias.fuente_ui(10),
         padx=12,
@@ -565,7 +579,11 @@ def _boton_categoria(contenedor, colores, titulo, comando, ayuda):
         anchor="w",
     )
     ToolTip(boton, ayuda)
-    preferencias.aplicar_hover(boton, fondo_normal=colores["base"])
+    preferencias.aplicar_hover(
+        boton,
+        fondo_normal=colores["base"],
+        fondo_hover=hover,
+    )
     return boton
 
 
