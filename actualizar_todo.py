@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 
 import preferencias
-from registro import confirmar, en_hilo, registrar, sudo_run
+from registro import confirmar, en_hilo, programar_ui, registrar, sudo_run
 from tooltip import ToolTip
 
 
@@ -100,20 +100,6 @@ def contar_apt():
             except ValueError:
                 pass
     return len(listar_apt_upgradable()), 0
-
-
-def contar_snap():
-    lista = listar_snap_refresh()
-    if lista is None:
-        return None
-    return len(lista)
-
-
-def contar_flatpak():
-    lista = listar_flatpak_updates()
-    if lista is None:
-        return None
-    return len(lista)
 
 
 def resumen_pendientes():
@@ -452,7 +438,7 @@ class ActualizarTodo:
 
         def on_progreso(texto):
             if self.root.winfo_exists():
-                self.root.after(0, lambda t=texto: self._avance(t))
+                programar_ui(self.root, lambda t=texto: self._avance(t))
 
         def trabajador():
             return ejecutar_actualizacion(on_progreso=on_progreso)

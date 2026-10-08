@@ -19,7 +19,7 @@ import preferencias
 from diagnostico import listar_unidades_fallidas
 from password import obtener_contrasena
 from tooltip import ToolTip
-from registro import registrar, registrar_comando, confirmar, en_hilo, sudo_run
+from registro import registrar, registrar_comando, confirmar, en_hilo, programar_ui, sudo_run
 
 
 def _centrar_ventana(ventana, ancho, alto):
@@ -620,10 +620,10 @@ class LimpiezaEspacio:
                 mapa = self._mapa_ocupacion()
                 elementos = self._recoger_elementos()
             except Exception as error:
-                self.root.after(0, lambda e=str(error): self._error_analisis(e))
+                programar_ui(self.root, lambda e=str(error): self._error_analisis(e))
                 return
-            self.root.after(
-                0,
+            programar_ui(
+                self.root,
                 lambda r=resumen, b=barra, m=mapa, el=elementos: self._mostrar_analisis(r, b, m, el),
             )
 
@@ -824,7 +824,7 @@ class LimpiezaEspacio:
                         mensajes.append(_quitar_kernels_viejos(item.get("extra") or [], contrasena))
                 except Exception as error:
                     mensajes.append(f"{item['nombre']}: {error}")
-            self.root.after(0, lambda m=mensajes: self._fin_limpieza(m))
+            programar_ui(self.root, lambda m=mensajes: self._fin_limpieza(m))
 
         threading.Thread(target=trabajador, daemon=True).start()
 
@@ -963,9 +963,12 @@ class SaludDiscos:
                     info = self._informe_smart(disco["name"], contrasena)
                     informes.append({**disco, **info})
             except Exception as error:
-                self.root.after(0, lambda e=str(error): messagebox.showerror("Error", e, parent=self.root))
+                programar_ui(
+                    self.root,
+                    lambda e=str(error): messagebox.showerror("Error", e, parent=self.root),
+                )
                 return
-            self.root.after(0, lambda inf=informes: self._mostrar(inf))
+            programar_ui(self.root, lambda inf=informes: self._mostrar(inf))
 
         threading.Thread(target=trabajador, daemon=True).start()
 
@@ -1104,9 +1107,12 @@ class ServiciosSystemd:
             try:
                 servicios = self._listar()
             except Exception as error:
-                self.root.after(0, lambda e=str(error): messagebox.showerror("Error", e, parent=self.root))
+                programar_ui(
+                    self.root,
+                    lambda e=str(error): messagebox.showerror("Error", e, parent=self.root),
+                )
                 return
-            self.root.after(0, lambda s=servicios: self._mostrar(s))
+            programar_ui(self.root, lambda s=servicios: self._mostrar(s))
 
         threading.Thread(target=trabajador, daemon=True).start()
 
@@ -1203,7 +1209,10 @@ class ServiciosSystemd:
 
         def trabajador():
             resultado = _comando_sudo(["systemctl", accion, unidad], contrasena, timeout=60)
-            self.root.after(0, lambda u=unidad, a=accion, r=resultado: self._fin_accion(u, a, r))
+            programar_ui(
+                self.root,
+                lambda u=unidad, a=accion, r=resultado: self._fin_accion(u, a, r),
+            )
 
         threading.Thread(target=trabajador, daemon=True).start()
 
@@ -2157,10 +2166,10 @@ class EspacioDiscos:
             resultado = trabajador()
         except Exception as error:
             if self.root.winfo_exists():
-                self.root.after(0, lambda e=error: fallo(e))
+                programar_ui(self.root, lambda e=error: fallo(e))
             return
         if self.root.winfo_exists():
-            self.root.after(0, lambda r=resultado: pintar(r))
+            programar_ui(self.root, lambda r=resultado: pintar(r))
 
     def _mostrar_carpetas(self, entradas, avisos):
         self.progreso.stop()

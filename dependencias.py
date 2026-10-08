@@ -92,11 +92,6 @@ def paquetes_python_faltantes():
     return faltantes
 
 
-def paquetes_pip_faltantes():
-    """Compatibilidad: ahora son paquetes APT de Python, no nombres de PyPI."""
-    return paquetes_python_faltantes()
-
-
 def resumen_dependencias_faltantes():
     return paquetes_sistema_faltantes(), paquetes_python_faltantes()
 

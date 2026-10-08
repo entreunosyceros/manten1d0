@@ -2,19 +2,17 @@ import subprocess
 from password import obtener_contrasena
 import threading
 import time
-from tkinter import messagebox, scrolledtext, Listbox, Scrollbar, END, simpledialog, Menu
+from tkinter import messagebox, scrolledtext, Listbox, Scrollbar, END, Menu
 import tkinter as tk
 from tkinter import ttk
 import os
 from tkinter import filedialog
 import psutil
 from tkinter import font
-#import tkinter.messagebox as messagebox
 import hashlib
 from datetime import datetime, timezone
 import platform
 from tooltip import ToolTip
-import subprocess
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from placeholder import entradaConPlaceHolder
@@ -1231,14 +1229,10 @@ class DesinstalarPaquetes:
 
         from registro import en_hilo, ventana_progreso
         progreso, _etiqueta = ventana_progreso(self.root, "Desinstalar", f"Desinstalando {package_name}...")
-        en_hilo(self.root, trabajador, al_terminar=al_terminar) 
+        en_hilo(self.root, trabajador, al_terminar=al_terminar)
+
+
 # Clase para consultar los logs del sistema
-
-import tkinter as tk
-from tkinter import scrolledtext, messagebox
-import os
-
-
 _MAX_LINEAS_LOG = 2000
 _UMBRAL_KB_LOG = 256  # Por encima, solo tail (no cargar syslog entero)
 

@@ -6,8 +6,6 @@ Imports:
     - messagebox desde tkinter: Para mostrar mensajes de alerta.
     - os: Para operaciones de sistema como manipulación de archivos.
     - Fernet desde cryptography.fernet: Para el cifrado de contraseñas.
-    - threading: Para ejecutar operaciones en segundo plano.
-    - Popen, PIPE desde subprocess: Para ejecutar comandos en el sistema operativo.
     - sys: Para interactuar con el sistema.
     - subprocess: Para ejecutar comandos del sistema operativo.
 
@@ -25,7 +23,6 @@ Funciones:
     - limpiar_archivos_configuracion(): Elimina los archivos de configuración.
     - almacenar_contrasena(contrasena): Almacena la contraseña cifrada en el archivo de configuración.
     - verificar_contrasena_sudo(contrasena): Verifica si la contraseña proporcionada es válida para utilizar sudo.
-    - solicitar_contrasena_y_ejecutar(funcion, mostrar_output=True): Solicita la contraseña al usuario y ejecuta una función con ella, mostrando el progreso.
 
 Raises:
     - Excepciones generales si ocurre algún error durante la ejecución.
@@ -35,12 +32,9 @@ import tkinter as tk
 from tkinter import messagebox
 import os
 from cryptography.fernet import Fernet
-import threading
-from subprocess import Popen, PIPE
 import sys
 from tooltip import ToolTip
 import subprocess
-import base64
 import dialogo_estilo as estilo
 
 # Contraseña cifrada en la carpeta de datos del usuario (escribible también con el .deb)
@@ -264,69 +258,3 @@ def verificar_contrasena_sudo(contrasena):
         print(f"Error al verificar la contraseña: {e}")
         return False
 
-
-# Función para solicitar la contraseña al usuario y ejecutar una función con ella
-def solicitar_contrasena_y_ejecutar(funcion, mostrar_output=True):
-    contrasena = obtener_contrasena()
-    if contrasena is None:
-        messagebox.showwarning("Contraseña requerida", "Debes ingresar una contraseña.")
-        return
-    elif not verificar_contrasena_sudo(contrasena):
-        messagebox.showerror("Contraseña Inválida", "Se necesita una contraseña válida para utilizar sudo.")
-        return
-    else:
-        if mostrar_output:
-            ventana_resultado = tk.Toplevel()
-            ventana_resultado.title("Resultado De La Operación")
-
-            etiqueta_progreso = tk.Label(ventana_resultado, text="Progreso:")
-            etiqueta_progreso.pack(pady=5)
-
-            texto_output = tk.Text(ventana_resultado, height=10, width=60)
-            texto_output.pack(padx=10, pady=5)
-
-            boton_cerrar = tk.Button(ventana_resultado, text="Cerrar", command=ventana_resultado.destroy)
-            boton_cerrar.pack(pady=5)
-            ToolTip(boton_cerrar, "Cierra esta ventana cuando termine el comando")
-
-            # Deshabilitar el botón de cerrar mientras se está ejecutando el comando
-            boton_cerrar.config(state=tk.DISABLED)
-
-            def actualizar_output(line):
-                texto_output.config(state=tk.NORMAL)
-                texto_output.insert(tk.END, line + "\n")
-                texto_output.config(state=tk.DISABLED)
-                texto_output.see(tk.END)  # Desplazar hacia abajo para mostrar el último texto
-                ventana_resultado.update()  # Actualizar la ventana para mostrar los cambios
-
-            def ejecucion_contrasena():
-                returncode = funcion(contrasena, actualizar_output)
-                boton_cerrar.config(state=tk.NORMAL)  # Habilitar el botón de cerrar después de la ejecución
-                if returncode == 0:
-                    etiqueta_progreso.config(text="Operación completada exitosamente", fg="green")
-                else:
-                    etiqueta_progreso.config(text=f"Error al ejecutar la operación. Código de salida: {returncode}", fg="red")
-
-            etiqueta_progreso = tk.Label(ventana_resultado, text="Ejecutando...", fg="blue")
-            etiqueta_progreso.pack(pady=10)
-
-            # Ejecutar el comando en un hilo separado para que la interfaz no se bloquee
-            threading.Thread(target=ejecucion_contrasena).start()
-        else:
-            return funcion(contrasena)
-        
-
-def cargar_clave_maestra(contrasena, salt):
-    import base64
-
-    # Combina la contraseña y el salt
-    contrasena_salt = contrasena + salt
-
-    # Codificar la contraseña y el salt con base64
-    contrasena_salt_bytes = contrasena_salt.encode('utf-8')
-    contrasena_salt_base64 = base64.urlsafe_b64encode(contrasena_salt_bytes)
-
-    # Asegurar que la clave tenga 32 bytes llenando con '=' si es necesario
-    clave_maestra = contrasena_salt_base64.ljust(32, b'=')
-
-    return clave_maestra 

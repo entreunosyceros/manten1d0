@@ -21,17 +21,14 @@ Funciones:
 """
  
 import subprocess
-from tkinter import messagebox
-from password import obtener_contrasena
 import os
+import fnmatch
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import fnmatch
-from password import obtener_contrasena  
+from password import obtener_contrasena
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from tooltip import ToolTip
 from registro import registrar, confirmar, en_hilo, ventana_progreso

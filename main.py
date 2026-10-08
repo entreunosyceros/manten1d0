@@ -52,16 +52,6 @@ from registro import mostrar_registro, vincular_bombeo_ui, detener_bombeo_ui
 from bandeja import BandejaSistema, preparar_ventana_app, instalar_icono_en_toplevels, CLASE_VENTANA
 from cat_vpn import vpn_en_uso
 from tooltip import ToolTip
-
-
-from password import limpiar_archivos_configuracion, obtener_contrasena
-from dependencias import instalar_dependencias, resumen_dependencias_faltantes
-from menuCategorias import archivos_cat, diccionario_cat, informacion_cat, internet_cat, navegadores_cat, perfil_cat, red_local_cat, sistema_cat, notas_cat, inicio_cat
-import preferencias  # Importar el módulo de preferencias para manejar el cambio de tema
-from registro import mostrar_registro, vincular_bombeo_ui, detener_bombeo_ui
-from bandeja import BandejaSistema, preparar_ventana_app, instalar_icono_en_toplevels, CLASE_VENTANA
-from cat_vpn import vpn_en_uso
-from tooltip import ToolTip
 import dialogo_estilo as estilo
 
 RUTA_LOGO_SPLASH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
