@@ -159,7 +159,7 @@ def _nombre_protocolo(codigo):
     for clave, etiqueta in PROTOCOLOS:
         if clave == codigo:
             return etiqueta
-    return codigo or "—"
+    return codigo or "-"
 
 
 class PanelExpressVPN:
@@ -307,15 +307,15 @@ class PanelExpressVPN:
     def _pintar(self):
         self._cargando = True
         try:
-            estado = _ESTADOS.get(self._datos.get("connectionstate"), self._datos.get("connectionstate") or "—")
+            estado = _ESTADOS.get(self._datos.get("connectionstate"), self._datos.get("connectionstate") or "-")
             self.estado.config(text=f"Estado: {estado}")
             protocolo = _nombre_protocolo(self._datos.get("protocol"))
             self.detalle.config(
                 text=(
-                    f"Región: {self._datos.get('region') or '—'}"
-                    f"  ·  Protocolo: {protocolo}\n"
-                    f"IP de la VPN: {self._datos.get('vpnip') or '—'}"
-                    f"  ·  IP pública: {self._datos.get('pubip') or '—'}"
+                    f"Región: {self._datos.get('region') or '-'}"
+                    f" | Protocolo: {protocolo}\n"
+                    f"IP de la VPN: {self._datos.get('vpnip') or '-'}"
+                    f" | IP pública: {self._datos.get('pubip') or '-'}"
                 )
             )
             regiones = list(self._regiones)

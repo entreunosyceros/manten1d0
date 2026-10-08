@@ -87,7 +87,7 @@ def _paquete_de_archivo(ruta, cache):
 
 
 def _tamanos_paquetes(paquetes):
-    """Installed-Size de dpkg en KB → bytes."""
+    """Installed-Size de dpkg en KB -> bytes."""
     if not paquetes:
         return {}
     # Consulta por lotes
@@ -253,7 +253,7 @@ def cargar_aplicaciones():
                 "id": f["id"],
                 "nombre": f["nombre"],
                 "origen": "Flatpak",
-                "version": (f.get("version") or "").replace("—", "").replace("–", "").strip() or "",
+                "version": (f.get("version") or "").replace("-", "").replace("-", "").strip() or "",
                 "tamano": f.get("tamano") or 0,
                 "escritorio": None,
                 "desktop_id": None,
@@ -589,7 +589,7 @@ class CentroAplicaciones:
             self._apps = apps
             extra = ""
             if avisos:
-                extra = " · " + "; ".join(avisos[:2])
+                extra = " | " + "; ".join(avisos[:2])
             self.lbl_estado.config(
                 text=f"{len(apps)} aplicación(es){extra}",
             )

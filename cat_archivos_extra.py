@@ -157,7 +157,7 @@ class PermisosArchivos:
         self.group.set(grupo)
         tipo = "carpeta" if os.path.isdir(ruta) else "archivo"
         self.info.config(
-            text=f"{tipo}: {ruta}\nPermisos {modo:o} ({stat.filemode(datos.st_mode)})  ·  {dueno}:{grupo}"
+            text=f"{tipo}: {ruta}\nPermisos {modo:o} ({stat.filemode(datos.st_mode)}) | {dueno}:{grupo}"
         )
 
     def _octal_a_checks(self):
@@ -324,7 +324,7 @@ class DispositivosBloque:
                 "model": campos.get("MODEL", ""),
             })
             marca = "USB" if extraible in ("1", "yes") or tran == "usb" else tipo
-            montaje = campos.get("MOUNTPOINT") or "—"
+            montaje = campos.get("MOUNTPOINT") or "-"
             self.lista.insert(
                 tk.END,
                 f"{campos.get('NAME', ''):<14} {campos.get('SIZE', ''):>7}  {marca:<6} "
@@ -345,7 +345,7 @@ class DispositivosBloque:
         if item["type"] == "disk" and not item.get("fstype"):
             messagebox.showwarning("Montar", "Selecciona una partición, no el disco entero.", parent=self.root)
             return
-        if item["mount"] not in ("", "—"):
+        if item["mount"] not in ("", "-"):
             messagebox.showinfo("Montar", f"Ya está montado en {item['mount']}.", parent=self.root)
             return
         if not confirmar(f"¿Montar {item['name']}?", self.root, "Montar"):
@@ -474,7 +474,7 @@ class ArchivosGrandes:
                     f"{item['motivo']:<10} {_formato_tamano(item['tamano']):>8}  {item['fecha']}  {item['ruta']}",
                 )
             total = sum(i["tamano"] for i in filas)
-            self.estado.config(text=f"{len(filas)} archivos · { _formato_tamano(total) }")
+            self.estado.config(text=f"{len(filas)} archivos | { _formato_tamano(total) }")
 
         en_hilo(self.root, trabajo, al_terminar=pintar)
 
@@ -555,9 +555,9 @@ class HashArchivo:
         _centrar(self.root, 640, 380)
         self.ruta = tk.StringVar()
         self.esperado = tk.StringVar()
-        self.md5 = tk.StringVar(value="—")
-        self.sha1 = tk.StringVar(value="—")
-        self.sha256 = tk.StringVar(value="—")
+        self.md5 = tk.StringVar(value="-")
+        self.sha1 = tk.StringVar(value="-")
+        self.sha256 = tk.StringVar(value="-")
 
         tk.Label(self.root, text="Comprobar hash de un archivo", font=("Arial", 14, "bold")).pack(pady=8)
         marco = tk.Frame(self.root)
@@ -598,7 +598,7 @@ class HashArchivo:
             self.ruta.set(ruta)
 
     def _copiar(self, texto):
-        if not texto or texto == "—":
+        if not texto or texto == "-":
             return
         self.root.clipboard_clear()
         self.root.clipboard_append(texto)
@@ -648,7 +648,7 @@ class HashArchivo:
             "SHA-256": self.sha256.get().lower(),
         }
         for nombre, valor in candidatos.items():
-            if valor and valor != "—" and valor == esperado:
+            if valor and valor != "-" and valor == esperado:
                 self.resultado.config(text=f"Coincide con {nombre}. El archivo es el esperado.")
                 return
         self.resultado.config(text="No coincide con MD5, SHA-1 ni SHA-256. Revisa la descarga.")
@@ -825,7 +825,7 @@ class CopiaUSB:
         self._ocupado = True
         self.btn_copiar.config(state=tk.DISABLED)
         self.btn_buscar.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Copiando… puede tardar si hay muchos archivos.")
+        self.lbl_estado.config(text="Copiando... puede tardar si hay muchos archivos.")
 
         def trabajo():
             montaje = disco["mount"]

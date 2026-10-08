@@ -280,8 +280,16 @@ SECCIONES = (
     (
         "Diccionario",
         "Abrir diccionario GNU/Linux carga un documento Markdown en línea con comandos "
-        "de Linux. Permite buscar términos, guardar el contenido y abrir una terminal.\n\n"
-        "Hace falta conexión a Internet para descargar el diccionario.",
+        "de Linux. Permite buscar términos, abrir un archivo .md, recargar el diccionario "
+        "por defecto y abrir una terminal.\n\n"
+        "Mis conceptos: puedes añadir, editar o eliminar tus propios términos. "
+        "La definición admite Markdown (**negrita**, listas, `código`, bloques de "
+        "comandos, enlaces...). Se guardan en este equipo "
+        "(~/.local/share/Manten1d0/diccionario_usuario.json) y aparecen al final "
+        "del diccionario, en la sección «Mis conceptos». También puedes gestionarlos "
+        "desde el menú Archivo de la ventana del diccionario.\n\n"
+        "Hace falta conexión a Internet para descargar el diccionario remoto; "
+        "los conceptos personales se consultan sin red.",
     ),
     (
         "Notas",

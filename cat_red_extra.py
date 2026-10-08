@@ -565,15 +565,15 @@ class PuertoDesdeInternet:
         self.root.title("Puerto Desde Internet")
         self.root.minsize(560, 420)
         _centrar(self.root, 600, 460)
-        self.ip_publica = tk.StringVar(value="…")
+        self.ip_publica = tk.StringVar(value="...")
         self.puerto = tk.StringVar(value="80")
 
         if not confirmar(
             "Vas a comprobar un puerto de ESTE equipo hacia Internet.\n\n"
             "Riesgos:\n"
-            "• Abrir puertos en el router puede exponer servicios de tu PC.\n"
-            "• No uses esto para mirar puertos de otras personas.\n"
-            "• Si tu operadora usa CGNAT, un puerto puede parecer cerrado "
+            "- Abrir puertos en el router puede exponer servicios de tu PC.\n"
+            "- No uses esto para mirar puertos de otras personas.\n"
+            "- Si tu operadora usa CGNAT, un puerto puede parecer cerrado "
             "aunque en casa esté bien.\n\n"
             "¿Quieres continuar?",
             self.root,
@@ -600,7 +600,7 @@ class PuertoDesdeInternet:
 
         fila_p = tk.Frame(self.root)
         fila_p.pack(fill=tk.X, padx=14, pady=4)
-        tk.Label(fila_p, text="Puerto (1–65535):").pack(side=tk.LEFT)
+        tk.Label(fila_p, text="Puerto (1-65535):").pack(side=tk.LEFT)
         tk.Entry(fila_p, textvariable=self.puerto, width=8).pack(side=tk.LEFT, padx=8)
 
         self.lbl_local = tk.Label(
@@ -672,7 +672,7 @@ class PuertoDesdeInternet:
         puerto = self._leer_puerto()
         if puerto is None:
             return
-        self.lbl_local.config(text="Comprobando escucha local…")
+        self.lbl_local.config(text="Comprobando escucha local...")
 
         def trabajo():
             return _puerto_escucha_local(puerto)
@@ -704,7 +704,7 @@ class PuertoDesdeInternet:
         if puerto is None:
             return
         ip = self.ip_publica.get().strip()
-        if not ip or ip in ("…", "No disponible"):
+        if not ip or ip in ("...", "No disponible"):
             messagebox.showinfo(
                 "Puerto Desde Internet",
                 "Todavía no se conoce la IP pública. Espera un momento o revisa la conexión.",

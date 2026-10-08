@@ -10,7 +10,7 @@ import preferencias
 from cat_informacion import Informacion
 from diagnostico import analizar_equipo
 from dialogo_estilo import panel_contenido
-from registro import en_hilo
+from registro import en_hilo, texto_plano as _texto_plano
 from tooltip import ToolTip
 
 
@@ -21,14 +21,6 @@ def _nivel_marca(nivel):
         "error": "ERROR",
         "info": "INFO",
     }.get(nivel, "?")
-
-
-def _texto_plano(valor):
-    """Quita simbolos decorativos que en algunas fuentes se ven como iconos."""
-    texto = str(valor)
-    for simbolo in ("●", "○", "◆", "▪", "►", "•", "★", "✓", "✔", "✗", "✘", "⚠", "…", "—", "–"):
-        texto = texto.replace(simbolo, "-")
-    return texto
 
 
 def generar_informe_asistencia():

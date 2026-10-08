@@ -594,13 +594,16 @@ class Informacion:
         if not datos:
             return "No disponible"
         actual = datos["current"]
-        partes = [f"{actual:.0f} °C"]
+        partes = [f"{actual:.0f} °C (paquete)"]
+        cmin, cmax = datos.get("core_min"), datos.get("core_max")
+        if cmin is not None and cmax is not None:
+            partes.append(f"núcleos {cmin:.0f}-{cmax:.0f} °C")
         high = datos.get("high")
         critical = datos.get("critical")
         if high is not None:
-            partes.append(f"(aviso del sensor a {high:.0f} °C)")
+            partes.append(f"(aviso a {high:.0f} °C)")
         elif critical is not None:
-            partes.append(f"(critico del sensor a {critical:.0f} °C)")
+            partes.append(f"(critico a {critical:.0f} °C)")
         return " ".join(partes)
 
     @staticmethod

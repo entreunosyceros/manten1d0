@@ -14,7 +14,11 @@ from cat_archivos import (
     descifrar_archivo,
 )
 from cat_archivos_extra import PermisosArchivos, DispositivosBloque, ArchivosGrandes, HashArchivo, CopiaUSB
-from cat_diccionario import abrir_ventana_diccionario, cargar_contenido_html
+from cat_diccionario import (
+    abrir_ventana_diccionario,
+    cargar_contenido_html,
+    gestionar_conceptos_tk,
+)
 from cat_editorTexto import EditorTextos, carpeta_notas, listar_notas
 from cat_informacion import Informacion
 from cat_internet import RedTools, hacer_ping, reiniciar_tarjeta_red
@@ -58,6 +62,7 @@ from diagnostico import analizar_equipo
 from reparar import RepararUbuntu
 from actualizar_todo import ActualizarTodo
 from informe_asistencia import InformeAsistencia
+from registro import texto_plano as _texto_plano
 from centro_aplicaciones import CentroAplicaciones
 from centro_seguridad import CentroSeguridad
 from analisis_arranque import AnalisisArranque
@@ -256,7 +261,7 @@ def inicio_cat(self, mensaje_personalizado=None):
                 partes.append(f"{errores} problema" + ("s" if errores != 1 else ""))
             if avisos:
                 partes.append(f"{avisos} aviso" + ("s" if avisos != 1 else ""))
-            texto_resumen = " · ".join(partes)
+            texto_resumen = " | ".join(partes)
             color_resumen = COLORES_AVISO["error"][0] if errores else COLORES_AVISO["aviso"][0]
         else:
             texto_resumen = "Sin problemas detectados"
@@ -349,9 +354,11 @@ def inicio_cat(self, mensaje_personalizado=None):
         for item in items:
             fondo, frente = COLORES_AVISO.get(item["nivel"], COLORES_AVISO["info"])
             comando = comando_item(item)
+            titulo = _texto_plano(item["titulo"])
+            detalle = _texto_plano(item["detalle"])
             boton = tk.Button(
                 interior,
-                text=f"{item['titulo']}\n{item['detalle']}",
+                text=f"{titulo}\n{detalle}",
                 bg=fondo,
                 fg=frente,
                 justify=tk.LEFT,
@@ -467,8 +474,24 @@ def diccionario_cat(self, mensaje_personalizado):
                 widget.config(bg=preferencias.color_fondo())
 
     def abrir_diccionario():
-        contenido_html = cargar_contenido_html()
-        abrir_ventana_diccionario(contenido_html)
+        try:
+            contenido_html, contenido_md = cargar_contenido_html()
+        except Exception as error:
+            messagebox.showerror(
+                "Diccionario",
+                f"No se pudo descargar el diccionario.\n\n{error}",
+                parent=self.root,
+            )
+            return
+        abrir_ventana_diccionario(
+            contenido_html,
+            contenido_md_base=contenido_md,
+            parent_tk=self.root,
+        )
+
+    def abrir_mis_conceptos():
+        # Mantener referencia para que el Toplevel no se recolecte
+        self._ventana_conceptos = gestionar_conceptos_tk(self.root)
 
     self.contenedor_texto.pack_forget()
     for widget in self.area_central.winfo_children():
@@ -491,8 +514,20 @@ def diccionario_cat(self, mensaje_personalizado):
 
     boton_diccionario = tk.Button(self.area_central, text="Abrir diccionario GNU/Linux", command=abrir_diccionario)
     aplicar_tema(boton_diccionario)
-    boton_diccionario.pack(pady=16)
+    boton_diccionario.pack(pady=(16, 8))
     ToolTip(boton_diccionario, "Consulta comandos GNU/Linux (hace falta Internet)")
+
+    boton_conceptos = tk.Button(
+        self.area_central,
+        text="Mis conceptos (añadir / editar)",
+        command=abrir_mis_conceptos,
+    )
+    aplicar_tema(boton_conceptos)
+    boton_conceptos.pack(pady=8)
+    ToolTip(
+        boton_conceptos,
+        "Añade términos propios; se muestran al final del diccionario",
+    )
     aplicar_tema(self.area_central)
 
 def _preparar_categoria(self, titulo, mensaje=None):
@@ -686,7 +721,7 @@ def sistema_cat(self, mensaje_personalizado):
             (
                 ("Administrar Procesos", lambda: AdministrarProcesos(tk.Toplevel(self.area_central)), "Abre una ventana para administrar los procesos del sistema"),
                 ("Monitorizar", lambda: MonitorRecursos(tk.Toplevel(self.area_central)), "CPU, RAM, disco y temperatura con barras; procesos ordenables por consumo; Abrir o Finalizar con confirmacion"),
-                ("Reparar Ubuntu", lambda: RepararUbuntu(tk.Toplevel(self.area_central)), "Continúa el diagnóstico: tarjetas por problema (APT, dpkg, cada servicio…) con confirmación guiada"),
+                ("Reparar Ubuntu", lambda: RepararUbuntu(tk.Toplevel(self.area_central)), "Continúa el diagnóstico: tarjetas por problema (APT, dpkg, cada servicio...) con confirmación guiada"),
                 ("Servicios", lambda: ServiciosSystemd(tk.Toplevel(self.area_central)), "Inicia, detiene, habilita o deshabilita servicios systemd"),
                 ("Servicios que fallan", lambda: ServiciosFallidos(tk.Toplevel(self.area_central)), "Lista unidades systemd en fallo, las reinicia o muestra un log corto"),
                 ("Ver logs", lambda: consultaLogs(tk.Toplevel(self.area_central)), "Consulta los registros más importantes del sistema"),

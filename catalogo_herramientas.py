@@ -85,6 +85,7 @@ def construir_catalogo(app):
         ("Red Local", "Red Local", "Equipos de casa, compartir y Wake-on-LAN", lambda: ir("Red Local")),
         ("Navegadores", "Navegadores", "Abrir, instalar y limpiar navegadores", lambda: ir("Navegadores")),
         ("Diccionario", "Diccionario", "Comandos Gnu/Linux", lambda: ir("Diccionario")),
+        ("Mis conceptos", "Diccionario", "Añadir terminos al diccionario", lambda: ir("Diccionario")),
         ("Notas", "Notas", "Apuntes rapidos", lambda: ir("Notas")),
         # Inicio / diagnostico
         ("Que problema tienes?", "Inicio", "Asistente por sintomas", panel(AsistenteProblemas)),

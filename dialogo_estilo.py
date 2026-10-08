@@ -163,7 +163,7 @@ def refrescar_chrome_tema(ventana):
 
 
 def enganchar_cuerpo_toplevel(contenedor, ventana):
-    """Devuelve el frame de contenido con metodos de ventana delegados (title, geometry…)."""
+    """Devuelve el frame de contenido con metodos de ventana delegados (title, geometry...)."""
     contenedor._ventana_real = ventana
     contenedor._chrome_manten = True
 

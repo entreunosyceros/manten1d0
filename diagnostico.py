@@ -287,7 +287,7 @@ def _check_actualizaciones():
                 return [{
                     "nivel": "aviso" if sec == 0 else "error",
                     "titulo": f"{total} actualizaciones pendientes{extra}",
-                    "detalle": "Abre Actualizar todo o Sistema → Actualizar Sistema para instalarlas.",
+                    "detalle": "Abre Actualizar todo o Sistema -> Actualizar Sistema para instalarlas.",
                     "destino": "Sistema",
                     "panel": "ActualizarTodo",
                 }]
@@ -304,7 +304,7 @@ def _check_actualizaciones():
         return [{
             "nivel": "aviso",
             "titulo": f"{len(lineas)} actualizaciones pendientes",
-            "detalle": "Abre Actualizar todo o Sistema → Actualizar Sistema para instalarlas.",
+            "detalle": "Abre Actualizar todo o Sistema -> Actualizar Sistema para instalarlas.",
             "destino": "Sistema",
             "panel": "ActualizarTodo",
         }]
@@ -484,10 +484,25 @@ def _leer_temperatura_cpu():
                     )
                 except (TypeError, ValueError):
                     critical = None
+                _cores = []
+                for _s in (temperaturas.get("coretemp") or []) + (
+                    temperaturas.get("k10temp") or []
+                ):
+                    _lab = (getattr(_s, "label", None) or "").strip().lower()
+                    if _lab.startswith("core") or _lab.startswith("tdie"):
+                        try:
+                            _cores.append(float(_s.current))
+                        except (TypeError, ValueError):
+                            pass
                 return {
                     "current": float(sensor.current),
                     "high": high,
                     "critical": critical,
+                    "chip": _chip,
+                    "label": getattr(sensor, "label", None),
+                    "core_min": min(_cores) if _cores else None,
+                    "core_max": max(_cores) if _cores else None,
+                    "core_avg": (sum(_cores) / len(_cores)) if _cores else None,
                 }
     valor = _temperatura_sysfs()
     if valor is None:
@@ -541,7 +556,10 @@ def _check_temperatura():
         nivel = "ok"
         titulo = f"Temperatura normal ({actual:.0f} °C)"
 
-    partes = [f"CPU {actual:.0f} °C"]
+    partes = [f"CPU (paquete) {actual:.0f} °C"]
+    cmin, cmax = datos.get("core_min"), datos.get("core_max")
+    if cmin is not None and cmax is not None:
+        partes.append(f"núcleos {cmin:.0f}-{cmax:.0f} °C")
     if high is not None:
         partes.append(f"aviso del sensor a {high:.0f} °C")
     elif critical is not None:

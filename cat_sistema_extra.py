@@ -290,7 +290,7 @@ class LimpiezaEspacio:
 
         self.lbl_resumen = tk.Label(
             self.root,
-            text="Calculando uso de disco…",
+            text="Calculando uso de disco...",
             font=("Arial", 11, "bold"),
             justify=tk.LEFT,
             anchor="w",
@@ -424,7 +424,7 @@ class LimpiezaEspacio:
 
     def _barra_uso(self, porcentaje):
         llenos = max(0, min(20, int(round(porcentaje / 5))))
-        return "█" * llenos + "░" * (20 - llenos)
+        return "#" * llenos + "-" * (20 - llenos)
 
     def _uso_discos(self):
         lineas = []
@@ -612,7 +612,7 @@ class LimpiezaEspacio:
             self.btn_profunda,
         ):
             boton.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Analizando espacio…")
+        self.lbl_estado.config(text="Analizando espacio...")
 
         def trabajador():
             try:
@@ -651,7 +651,7 @@ class LimpiezaEspacio:
         if mapa:
             trozos = [f"{nombre} {_formato_tamano(tam)}" for nombre, tam in mapa[:8]]
             self.lbl_mapa.config(
-                text="En tu carpeta personal: " + " · ".join(trozos),
+                text="En tu carpeta personal: " + " | ".join(trozos),
             )
         else:
             self.lbl_mapa.config(text="No se pudo desglosar el uso de la carpeta personal.")
@@ -679,7 +679,7 @@ class LimpiezaEspacio:
             if elemento.get("perfil") == "profunda":
                 etiqueta_perfil = "  [profunda]"
             texto = (
-                f"{elemento['nombre']}  —  {_formato_tamano(elemento['tamano'])}{etiqueta_perfil}\n"
+                f"{elemento['nombre']}  -  {_formato_tamano(elemento['tamano'])}{etiqueta_perfil}\n"
                 f"{elemento['descripcion']}"
             )
             casilla = tk.Checkbutton(
@@ -696,8 +696,8 @@ class LimpiezaEspacio:
             casilla.pack(fill=tk.X, pady=4, anchor="w")
         self.lbl_estado.config(
             text=(
-                f"Recuperable (rápida ≈ {_formato_tamano(recuperable_rapida)} · "
-                f"todo ≈ {_formato_tamano(recuperable)})"
+                f"Recuperable (rápida ~ {_formato_tamano(recuperable_rapida)} | "
+                f"todo ~ {_formato_tamano(recuperable)})"
             )
         )
         for boton in (
@@ -766,7 +766,7 @@ class LimpiezaEspacio:
             self.btn_profunda,
         ):
             boton.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Limpiando…")
+        self.lbl_estado.config(text="Limpiando...")
 
         def trabajador():
             mensajes = []
@@ -1333,7 +1333,7 @@ def _impresoras_cups():
 
 
 def _impresoras_lpinfo():
-    """Backends que anuncia CUPS (USB, IPP, socket, Bonjour…)."""
+    """Backends que anuncia CUPS (USB, IPP, socket, Bonjour...)."""
     halladas = []
     resultado = _comando(["lpinfo", "-v"], timeout=40)
     if resultado.returncode != 0:
@@ -1487,21 +1487,21 @@ class Impresoras:
             filas = _impresoras_cups() + _impresoras_usb() + _impresoras_avahi() + _impresoras_lpinfo()
             return filas, f"{len(filas)} resultado(s). USB, red e instaladas."
 
-        self._buscar("Buscando impresoras USB y de red…", trabajador)
+        self._buscar("Buscando impresoras USB y de red...", trabajador)
 
     def buscar_usb(self):
         def trabajador():
             filas = _impresoras_usb() + [f for f in _impresoras_lpinfo() if f["tipo"] == "USB"]
             return filas, f"{len(filas)} impresora(s) USB."
 
-        self._buscar("Buscando impresoras USB…", trabajador)
+        self._buscar("Buscando impresoras USB...", trabajador)
 
     def buscar_red(self):
         def trabajador():
             filas = _impresoras_avahi() + [f for f in _impresoras_lpinfo() if f["tipo"] == "Red"]
             return filas, f"{len(filas)} impresora(s) de red."
 
-        self._buscar("Buscando impresoras en la red local…", trabajador)
+        self._buscar("Buscando impresoras en la red local...", trabajador)
 
     def buscar_cups(self):
         def trabajador():
@@ -1510,7 +1510,7 @@ class Impresoras:
                 return filas, "CUPS no está disponible. Instala el paquete cups-client."
             return filas, f"{len(filas)} cola(s) instalada(s) en CUPS."
 
-        self._buscar("Leyendo impresoras de CUPS…", trabajador)
+        self._buscar("Leyendo impresoras de CUPS...", trabajador)
 
     def _seleccion(self):
         item = self.tree.focus()
@@ -1733,7 +1733,7 @@ def _barra_uso(tamano, maximo, ancho=16):
     if tamano <= 0 or maximo <= 0:
         return ""
     bloques = max(1, round(ancho * tamano / maximo))
-    return "█" * min(ancho, bloques)
+    return "#" * min(ancho, bloques)
 
 
 class EspacioDiscos:
@@ -2128,12 +2128,12 @@ class EspacioDiscos:
         texto_disco = ""
         if disco:
             texto_disco = (
-                f"{disco['montaje']} · {_formato_tamano(disco['usado'])} de "
+                f"{disco['montaje']} | {_formato_tamano(disco['usado'])} de "
                 f"{_formato_tamano(disco['total'])} ({disco['porcentaje']} % ocupado, "
                 f"{_formato_tamano(disco['libre'])} libres)\n"
             )
         self.lbl_ruta.config(text=texto_disco + ruta)
-        self.lbl_estado.config(text="Calculando carpetas… en discos grandes puede tardar.")
+        self.lbl_estado.config(text="Calculando carpetas... en discos grandes puede tardar.")
         self.progreso.start(12)
         self.btn_subir.config(state=tk.DISABLED)
         contrasena = self._contrasena if self.con_sudo.get() else None
@@ -2221,7 +2221,7 @@ class EspacioDiscos:
         mayor = entradas[0]
         porcentaje = (mayor["tamano"] / usado) * 100 if usado else 0
         texto = (
-            f"{len(entradas)} elementos · lo que más ocupa es {mayor['nombre']} "
+            f"{len(entradas)} elementos | lo que más ocupa es {mayor['nombre']} "
             f"({_formato_tamano(mayor['tamano'])}, {_texto_porcentaje(porcentaje)} del disco)"
         )
         if len(entradas) > _LIMITE_CARPETAS:
@@ -2321,7 +2321,7 @@ class Cortafuegos:
         self._reglas = {"ssh": False, "samba": False, "lan": False}
 
         tk.Label(self.root, text="Cortafuegos", font=("Arial", 14, "bold")).pack(pady=(12, 4))
-        self.lbl_estado = tk.Label(self.root, text="Comprobando…", font=("Arial", 12, "bold"))
+        self.lbl_estado = tk.Label(self.root, text="Comprobando...", font=("Arial", 12, "bold"))
         self.lbl_estado.pack(pady=(0, 6))
         tk.Label(
             self.root,
@@ -2398,7 +2398,7 @@ class Cortafuegos:
         lbl_titulo = tk.Label(fila, text=titulo, width=28, anchor="w")
         lbl_titulo.pack(side=tk.LEFT)
         ToolTip(lbl_titulo, tooltip)
-        lbl_estado = tk.Label(fila, text="…", width=12, anchor="w")
+        lbl_estado = tk.Label(fila, text="...", width=12, anchor="w")
         lbl_estado.pack(side=tk.LEFT, padx=6)
         boton = tk.Button(fila, text="Permitir", width=10, command=comando)
         boton.pack(side=tk.RIGHT)
@@ -2431,7 +2431,7 @@ class Cortafuegos:
             )
             for fila in self._filas.values():
                 fila["boton"].config(state=tk.DISABLED)
-                fila["estado"].config(text="—")
+                fila["estado"].config(text="-")
             return
         activo = _ufw_activado()
         if activo is None:
@@ -2485,7 +2485,7 @@ class Cortafuegos:
         if not _ufw_instalado():
             self._mostrar_estado()
             return
-        self._set_ocupado(True, "Leyendo reglas…")
+        self._set_ocupado(True, "Leyendo reglas...")
 
         def trabajo():
             self._cidr = _cidr_lan()
@@ -2571,7 +2571,7 @@ class Cortafuegos:
                     r = sudo_run(["ufw", "delete", "allow", "22/tcp"], "Quitar permiso SSH 22/tcp", timeout=40)
                 return r
 
-            self._aplicar_fn(trabajo, "Quitando permiso SSH…")
+            self._aplicar_fn(trabajo, "Quitando permiso SSH...")
             return
         if not confirmar(
             "Se va a permitir SSH (acceso remoto seguro, puerto 22).\n\n"
@@ -2587,7 +2587,7 @@ class Cortafuegos:
                 r = sudo_run(["ufw", "allow", "22/tcp"], "Permitir SSH 22/tcp", timeout=40)
             return r
 
-        self._aplicar_fn(trabajo, "Permitiendo SSH…")
+        self._aplicar_fn(trabajo, "Permitiendo SSH...")
 
     def _toggle_samba(self):
         if self._ocupado:
@@ -2645,7 +2645,7 @@ class Cortafuegos:
         self._aplicar(["ufw", "allow", "from", cidr], f"Permitir acceso desde {cidr}")
 
     def _aplicar(self, args, descripcion):
-        self._aplicar_fn(lambda: sudo_run(args, descripcion, timeout=180), "Espera un momento…")
+        self._aplicar_fn(lambda: sudo_run(args, descripcion, timeout=180), "Espera un momento...")
 
     def _aplicar_fn(self, trabajo, mensaje):
         if self._ocupado:
@@ -2810,7 +2810,7 @@ class SnapFlatpak:
 
         self.lbl_resumen = tk.Label(
             self.root,
-            text="Cargando lista…",
+            text="Cargando lista...",
             font=("Arial", 11, "bold"),
             anchor="w",
             justify=tk.LEFT,
@@ -2932,8 +2932,8 @@ class SnapFlatpak:
     def cargar(self):
         if self._ocupado:
             return
-        self._set_ocupado(True, "Leyendo aplicaciones instaladas…")
-        self.lbl_resumen.config(text="Cargando lista…")
+        self._set_ocupado(True, "Leyendo aplicaciones instaladas...")
+        self.lbl_resumen.config(text="Cargando lista...")
 
         def trabajador():
             snaps, err_snap = _listar_snaps()
@@ -2994,7 +2994,7 @@ class SnapFlatpak:
             ),
             f"Total listado: {_formato_tamano(total_snap + total_flat)}",
         ]
-        self.lbl_resumen.config(text="  ·  ".join(partes))
+        self.lbl_resumen.config(text=" | ".join(partes))
         self.lbl_aviso.config(text="\n".join(avisos))
         self._aplicar_filtro()
 
@@ -3038,7 +3038,7 @@ class SnapFlatpak:
             return
         self._ejecutar_accion(
             lambda: self._hacer_actualizar_una(app),
-            f"Actualizando {app['nombre']}…",
+            f"Actualizando {app['nombre']}...",
             "Actualizar aplicación",
         )
 
@@ -3060,7 +3060,7 @@ class SnapFlatpak:
             return
         self._ejecutar_accion(
             lambda: self._hacer_actualizar_todas(filtro),
-            "Actualizando aplicaciones…",
+            "Actualizando aplicaciones...",
             "Actualizar todas",
         )
 
@@ -3086,7 +3086,7 @@ class SnapFlatpak:
             return
         self._ejecutar_accion(
             lambda: self._hacer_desinstalar(app),
-            f"Desinstalando {app['nombre']}…",
+            f"Desinstalando {app['nombre']}...",
             "Desinstalar Snap/Flatpak",
         )
 
@@ -3105,7 +3105,7 @@ class SnapFlatpak:
         def trabajo():
             return sudo_run(["apt-get", "install", "-y", "flatpak"], "Instalar Flatpak", timeout=600)
 
-        self._ejecutar_accion(trabajo, "Instalando Flatpak…", "Instalar Flatpak", recargar=True)
+        self._ejecutar_accion(trabajo, "Instalando Flatpak...", "Instalar Flatpak", recargar=True)
 
     def _hacer_actualizar_una(self, app):
         if app["tipo"] == "Snap":
@@ -3277,7 +3277,7 @@ class Bluetooth:
 
         self.lbl_adaptador = tk.Label(
             self.root,
-            text="Comprobando adaptador…",
+            text="Comprobando adaptador...",
             font=("Arial", 11, "bold"),
             anchor="w",
         )
@@ -3362,7 +3362,7 @@ class Bluetooth:
     def cargar(self):
         if self._ocupado:
             return
-        self._set_ocupado(True, "Leyendo dispositivos Bluetooth…")
+        self._set_ocupado(True, "Leyendo dispositivos Bluetooth...")
 
         def trabajador():
             adaptador, powered, err_ad = _estado_adaptador_bluetooth()
@@ -3450,7 +3450,7 @@ class Bluetooth:
             )
             return resultado
 
-        self._ejecutar(trabajo, f"Olvidando {dispositivo['nombre']}…", "Olvidar Bluetooth")
+        self._ejecutar(trabajo, f"Olvidando {dispositivo['nombre']}...", "Olvidar Bluetooth")
 
     def _reiniciar(self):
         if self._ocupado:
@@ -3472,7 +3472,7 @@ class Bluetooth:
                 timeout=120,
             )
 
-        self._ejecutar(trabajo, "Reiniciando Bluetooth…", "Reiniciar Bluetooth")
+        self._ejecutar(trabajo, "Reiniciando Bluetooth...", "Reiniciar Bluetooth")
 
     def _ejecutar(self, trabajo, mensaje, titulo):
         self._set_ocupado(True, mensaje)
@@ -3539,7 +3539,7 @@ class ServiciosFallidos:
             justify=tk.LEFT,
         ).pack(padx=14, pady=(0, 6))
 
-        self.lbl_estado = tk.Label(self.root, text="Cargando…", font=("Arial", 11, "bold"), anchor="w")
+        self.lbl_estado = tk.Label(self.root, text="Cargando...", font=("Arial", 11, "bold"), anchor="w")
         self.lbl_estado.pack(fill=tk.X, padx=14, pady=(0, 2))
 
         self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
@@ -3626,7 +3626,7 @@ class ServiciosFallidos:
     def cargar(self):
         if self._ocupado:
             return
-        self._set_ocupado(True, "Buscando unidades en fallo…")
+        self._set_ocupado(True, "Buscando unidades en fallo...")
 
         def trabajador():
             return listar_unidades_fallidas()
@@ -3694,7 +3694,7 @@ class ServiciosFallidos:
         def trabajo():
             return sudo_run(["systemctl", "restart", nombre], f"Reiniciar {nombre}", timeout=120)
 
-        self._set_ocupado(True, f"Reiniciando {nombre}…")
+        self._set_ocupado(True, f"Reiniciando {nombre}...")
 
         def al_terminar(resultado):
             if not self.root.winfo_exists():
@@ -3730,7 +3730,7 @@ class ServiciosFallidos:
             )
             return
         nombre = unidad["unidad"]
-        self._set_ocupado(True, f"Leyendo log de {nombre}…")
+        self._set_ocupado(True, f"Leyendo log de {nombre}...")
 
         def trabajo():
             return _log_corto_unidad(nombre)
@@ -3905,7 +3905,7 @@ class Sonido:
         ).pack(padx=14, pady=(0, 6))
 
         self.lbl_estado = tk.Label(
-            self.root, text="Comprobando…", font=("Arial", 11, "bold"), anchor="w", wraplength=580, justify=tk.LEFT
+            self.root, text="Comprobando...", font=("Arial", 11, "bold"), anchor="w", wraplength=580, justify=tk.LEFT
         )
         self.lbl_estado.pack(fill=tk.X, padx=14, pady=(0, 4))
 
@@ -3967,7 +3967,7 @@ class Sonido:
     def cargar(self):
         if self._ocupado:
             return
-        self._set_ocupado(True, "Leyendo salidas de audio…")
+        self._set_ocupado(True, "Leyendo salidas de audio...")
 
         def trabajo():
             motor = _motor_audio()
@@ -4002,7 +4002,7 @@ class Sonido:
         if datos.get("error"):
             self.lbl_estado.config(text=datos["error"], fg="#c0392b")
             return
-        defecto = datos.get("defecto") or "—"
+        defecto = datos.get("defecto") or "-"
         etiqueta_def = next((s["etiqueta"] for s in self._salidas if s["defecto"]), defecto)
         self.lbl_estado.config(
             text=f"Motor: {nombre_motor}. Salida por defecto: {etiqueta_def}",
@@ -4012,10 +4012,10 @@ class Sonido:
             self.lista.insert(tk.END, "No hay salidas de audio visibles.")
             return
         for salida in self._salidas:
-            marca = "★ " if salida["defecto"] else "  "
+            marca = "* " if salida["defecto"] else "  "
             self.lista.insert(
                 tk.END,
-                f"{marca}{salida['etiqueta']}  —  {salida['nombre']}  ({salida['estado']})",
+                f"{marca}{salida['etiqueta']}  -  {salida['nombre']}  ({salida['estado']})",
             )
 
     def _usar_salida(self):
@@ -4038,7 +4038,7 @@ class Sonido:
             registrar("Salida de audio", salida["nombre"], resultado.returncode == 0)
             return resultado
 
-        self._set_ocupado(True, "Cambiando salida…")
+        self._set_ocupado(True, "Cambiando salida...")
 
         def al_terminar(resultado):
             if not self.root.winfo_exists():
@@ -4072,7 +4072,7 @@ class Sonido:
         def trabajo():
             return _reiniciar_audio()
 
-        self._set_ocupado(True, "Reiniciando audio…")
+        self._set_ocupado(True, "Reiniciando audio...")
 
         def al_terminar(par):
             if not self.root.winfo_exists():
@@ -4136,7 +4136,7 @@ def _listar_pantallas():
         nombre = partes[0]
         conectada = " connected" in linea
         primaria = "primary" in linea
-        resolucion = "—"
+        resolucion = "-"
         if conectada:
             coincidencia = re.search(r"(\d+x\d+\+\d+\+\d+)", linea)
             if coincidencia:
@@ -4150,7 +4150,7 @@ def _listar_pantallas():
             "nombre": nombre,
             "conectada": conectada,
             "primaria": primaria,
-            "resolucion": resolucion if conectada else "—",
+            "resolucion": resolucion if conectada else "-",
             "tipo": tipo,
         })
     return pantallas, None
@@ -4203,7 +4203,7 @@ class Pantallas:
         ).pack(padx=14, pady=(0, 6))
 
         self.lbl_estado = tk.Label(
-            self.root, text="Comprobando…", font=("Arial", 11, "bold"), anchor="w", wraplength=660, justify=tk.LEFT
+            self.root, text="Comprobando...", font=("Arial", 11, "bold"), anchor="w", wraplength=660, justify=tk.LEFT
         )
         self.lbl_estado.pack(fill=tk.X, padx=14, pady=(0, 4))
 
@@ -4292,7 +4292,7 @@ class Pantallas:
     def cargar(self):
         if self._ocupado:
             return
-        self._set_ocupado(True, "Leyendo pantallas…")
+        self._set_ocupado(True, "Leyendo pantallas...")
 
         def trabajo():
             return _listar_pantallas()
@@ -4330,7 +4330,7 @@ class Pantallas:
                 continue
             estado = "conectada" if pantalla["conectada"] else "desconectada"
             if pantalla["primaria"]:
-                estado += " · primaria"
+                estado += " | primaria"
             iid = self.tree.insert(
                 "",
                 tk.END,
@@ -4390,7 +4390,7 @@ class Pantallas:
         args = []
         for nombre in conectadas:
             args.extend(["--output", nombre, "--auto"])
-        self._ejecutar_xrandr(args, "Detectar pantallas", "Detectando pantallas…")
+        self._ejecutar_xrandr(args, "Detectar pantallas", "Detectando pantallas...")
 
     def _solo_esta(self):
         if self._ocupado:
@@ -4409,7 +4409,7 @@ class Pantallas:
         for pantalla in self._pantallas:
             if pantalla["conectada"] and pantalla["nombre"] != elegida["nombre"]:
                 args.extend(["--output", pantalla["nombre"], "--off"])
-        self._ejecutar_xrandr(args, "Solo una pantalla", "Aplicando una sola pantalla…")
+        self._ejecutar_xrandr(args, "Solo una pantalla", "Aplicando una sola pantalla...")
 
     def _extender(self):
         if self._ocupado:
@@ -4433,7 +4433,7 @@ class Pantallas:
             "--output", interna["nombre"], "--auto", "--primary",
             "--output", externa["nombre"], "--auto", "--right-of", interna["nombre"],
         ]
-        self._ejecutar_xrandr(args, "Extender pantallas", "Extendiendo pantallas…")
+        self._ejecutar_xrandr(args, "Extender pantallas", "Extendiendo pantallas...")
 
     def _espejo(self):
         if self._ocupado:
@@ -4457,7 +4457,7 @@ class Pantallas:
             "--output", interna["nombre"], "--auto", "--primary",
             "--output", externa["nombre"], "--auto", "--same-as", interna["nombre"],
         ]
-        self._ejecutar_xrandr(args, "Espejo de pantallas", "Aplicando espejo…")
+        self._ejecutar_xrandr(args, "Espejo de pantallas", "Aplicando espejo...")
 
     def _abrir_gnome(self):
         for comando in (["gnome-control-center", "display"], ["gnome-control-center", "displays"]):

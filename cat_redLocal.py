@@ -60,7 +60,7 @@ def _resolver_nombre(ip):
             return nombre
     except OSError:
         pass
-    return "—"
+    return "-"
 
 
 def _ordenar_ip(ip):
@@ -105,10 +105,10 @@ def encontrar_dispositivos_en_red():
     for host in hosts:
         info = escaner[host]
         nombre = info.hostname() or _resolver_nombre(host)
-        mac = (info.get("addresses") or {}).get("mac") or arp.get(host) or "—"
+        mac = (info.get("addresses") or {}).get("mac") or arp.get(host) or "-"
         dispositivos.append({
             "ip": host,
-            "nombre": nombre or "—",
+            "nombre": nombre or "-",
             "mac": mac,
             "samba": host in samba,
         })
@@ -118,7 +118,7 @@ def encontrar_dispositivos_en_red():
 
 def formatear_dispositivo(item):
     samba = "Samba: sí" if item.get("samba") else "Samba: no"
-    return f"{item['ip']:<16} {item.get('nombre') or '—':<22} {item.get('mac') or '—':<18} {samba}"
+    return f"{item['ip']:<16} {item.get('nombre') or '-':<22} {item.get('mac') or '-':<18} {samba}"
 
 
 def ip_de_linea(texto, lista=None):
@@ -362,7 +362,7 @@ class CompartirCarpeta:
             self.lista.insert(tk.END, "Todavía no compartes ninguna carpeta.")
             return
         for recurso in self.recursos:
-            self.lista.insert(tk.END, f"{recurso['nombre']}  —  {recurso['acceso']}  —  {recurso['ruta']}")
+            self.lista.insert(tk.END, f"{recurso['nombre']}  -  {recurso['acceso']}  -  {recurso['ruta']}")
 
     def compartir(self):
         if self._ocupado:
@@ -463,7 +463,7 @@ class CompartirCarpeta:
 
                 def tras_ufw(resultado):
                     if resultado is not None and resultado.returncode == 0:
-                        self.lbl_estado.config(text=self.lbl_estado.cget("text") + "  ·  Samba permitido en el cortafuegos.")
+                        self.lbl_estado.config(text=self.lbl_estado.cget("text") + " | Samba permitido en el cortafuegos.")
 
                 en_hilo(self.root, abrir_samba, al_terminar=tras_ufw)
             messagebox.showinfo(
@@ -573,7 +573,7 @@ class EncenderPC:
             return
         for equipo in self.equipos:
             ip = equipo.get("ip") or "sin IP"
-            self.lista.insert(tk.END, f"{equipo.get('nombre') or 'PC'}  —  {equipo['mac']}  —  {ip}")
+            self.lista.insert(tk.END, f"{equipo.get('nombre') or 'PC'}  -  {equipo['mac']}  -  {ip}")
 
     def _al_elegir(self, _evento):
         indice = self.lista.curselection()
@@ -753,7 +753,7 @@ class RouterCasa:
 
     def comprobar(self):
         self.btn_comprobar.config(state=tk.DISABLED)
-        self.lbl_estado.config(text="Comprobando…", fg="#2471a3")
+        self.lbl_estado.config(text="Comprobando...", fg="#2471a3")
         self.lbl_detalle.config(text="")
 
         def trabajo():

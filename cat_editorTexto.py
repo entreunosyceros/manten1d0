@@ -131,7 +131,7 @@ class EditorTextos:
 
     def _actualizar_titulo(self):
         nombre = os.path.basename(self.ruta_archivo) if self.ruta_archivo else "Nota nueva"
-        self.root.title(f"Editor De Texto — {nombre}")
+        self.root.title(f"Editor De Texto - {nombre}")
 
     def _cargar_ruta(self, ruta):
         try:

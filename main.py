@@ -57,9 +57,12 @@ import dialogo_estilo as estilo
 RUTA_LOGO_SPLASH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Manten1do.png")
 
 
-def mostrar_splash(duracion_ms=3000):
-    """Pantalla de arranque centrada con el logo; como maximo 3 segundos."""
-    splash = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
+def mostrar_splash(parent, duracion_ms=3000):
+    """Splash como Toplevel de la unica raiz Tk (evita Tcl_AsyncDelete al recrear Tk)."""
+    try:
+        splash = tk.Toplevel(parent, chrome=False)
+    except TypeError:
+        splash = tk.Toplevel(parent)
     splash.withdraw()
     splash.overrideredirect(True)
     try:
@@ -71,25 +74,25 @@ def mostrar_splash(duracion_ms=3000):
     marco = tk.Frame(splash, bg=fondo, padx=28, pady=28)
     marco.pack(fill=tk.BOTH, expand=True)
 
-    foto = None
+    refs = {"foto": None, "lbl": None}
     try:
         from PIL import Image, ImageTk
 
         imagen = Image.open(RUTA_LOGO_SPLASH)
         imagen.thumbnail((360, 360), Image.LANCZOS)
-        foto = ImageTk.PhotoImage(imagen, master=splash)
-        lbl = tk.Label(marco, image=foto, bg=fondo)
-        lbl.image = foto
-        lbl.pack()
+        refs["foto"] = ImageTk.PhotoImage(imagen, master=splash)
+        refs["lbl"] = tk.Label(marco, image=refs["foto"], bg=fondo)
+        refs["lbl"].image = refs["foto"]
+        refs["lbl"].pack()
     except Exception:
-        lbl = tk.Label(
+        refs["lbl"] = tk.Label(
             marco,
             text="Manten1d0",
             font=("Arial", 28, "bold"),
             bg=fondo,
             fg="#ffffff",
         )
-        lbl.pack(pady=40)
+        refs["lbl"].pack(pady=40)
 
     tk.Label(
         marco,
@@ -114,6 +117,14 @@ def mostrar_splash(duracion_ms=3000):
         if cerrado["ok"]:
             return
         cerrado["ok"] = True
+        # Liberar PhotoImage en el hilo de Tk antes de destruir el Toplevel
+        try:
+            if refs["lbl"] is not None:
+                refs["lbl"].configure(image="")
+                refs["lbl"].image = None
+        except tk.TclError:
+            pass
+        refs["foto"] = None
         try:
             splash.destroy()
         except tk.TclError:
@@ -122,7 +133,7 @@ def mostrar_splash(duracion_ms=3000):
     splash.bind("<Button-1>", cerrar)
     splash.bind("<Escape>", cerrar)
     splash.after(max(500, min(int(duracion_ms), 3000)), cerrar)
-    splash.mainloop()
+    parent.wait_window(splash)
 
 
 def instalar_dependencias_con_progreso(parent):
@@ -181,17 +192,30 @@ def instalar_dependencias_con_progreso(parent):
     return resultado["ok"], resultado["error"]
 
 
+def _limpiar_hijos(raiz):
+    for hijo in list(raiz.winfo_children()):
+        try:
+            hijo.destroy()
+        except tk.TclError:
+            pass
+
+
 def main():
     print(f"Ejecutando programa con: {sys.executable}")
 
-    mostrar_splash(3000)
-    obtener_contrasena()
-
+    # Una sola raiz Tk para todo el ciclo de vida (splash -> password -> deps -> app).
+    # Crear/destruir varios tk.Tk() + PhotoImage provoca Tcl_AsyncDelete.
     root = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
+    root.withdraw()
     preparar_ventana_app(root)
-    vincular_bombeo_ui(root)
     instalar_icono_en_toplevels()
 
+    mostrar_splash(root, 3000)
+    obtener_contrasena()
+
+    vincular_bombeo_ui(root)
+    _limpiar_hijos(root)
+    root.deiconify()
     cuerpo = estilo.preparar_dialogo(
         root,
         "Manten1d0 - Comprobando dependencias",
@@ -286,19 +310,44 @@ def close_progress(root, progress_bar, label):
         ancho=460,
         alto=240,
     )
-    # Parar after() del bombeo antes de destruir esta raíz temporal
+    # Ocultar la raiz mientras se reconstruye (evita el flash de ventana en blanco)
     detener_bombeo_ui()
     try:
-        root.destroy()
+        root.attributes("-topmost", False)
     except tk.TclError:
         pass
-    # Crear la ventana principal
-    main_window = tk.Tk(className=CLASE_VENTANA, baseName=CLASE_VENTANA)
-    preparar_ventana_app(main_window, estilo_dialogo=True)
-    vincular_bombeo_ui(main_window)
-    instalar_icono_en_toplevels()
-    VentanaPrincipal(main_window)
-    main_window.mainloop()
+    try:
+        root.withdraw()
+    except tk.TclError:
+        pass
+    root.update_idletasks()
+
+    _limpiar_hijos(root)
+    for attr in (
+        "_chrome_manten",
+        "_franja_estilo",
+        "_contenedor_estilo",
+        "_shell_estilo",
+        "_color_franja_estilo",
+    ):
+        try:
+            if hasattr(root, attr):
+                delattr(root, attr)
+        except Exception:
+            pass
+    root.resizable(True, True)
+    preparar_ventana_app(root, estilo_dialogo=True)
+    vincular_bombeo_ui(root)
+    VentanaPrincipal(root)
+    # Mostrar solo cuando la UI principal ya está montada
+    try:
+        root.update_idletasks()
+        root.deiconify()
+        root.lift()
+        root.focus_force()
+    except tk.TclError:
+        pass
+    # Ya estamos dentro de root.mainloop(); no crear otro Tk ni otro mainloop.
 
 ##############################################################VENTANA PRINCIPAL##############################################################
 
@@ -541,7 +590,7 @@ class VentanaPrincipal:
 
             self.lbl_ip_privada = tk.Label(
                 marco_estado,
-                text="IP privada: …",
+                text="IP privada: ...",
                 bg=barra,
                 fg=texto,
                 font=preferencias.fuente_ui(9),
@@ -555,7 +604,7 @@ class VentanaPrincipal:
 
             self.lbl_ip_publica = tk.Label(
                 marco_estado,
-                text="IP pública: …",
+                text="IP pública: ...",
                 bg=barra,
                 fg=texto,
                 font=preferencias.fuente_ui(9),
@@ -569,7 +618,7 @@ class VentanaPrincipal:
 
             self.lbl_vpn = tk.Label(
                 marco_estado,
-                text="VPN: …",
+                text="VPN: ...",
                 bg=barra,
                 fg=texto,
                 font=preferencias.fuente_ui(9),
@@ -788,7 +837,7 @@ class VentanaPrincipal:
             self.lista_busqueda.insert(tk.END, "Sin resultados")
             return
         for item in resultados:
-            self.lista_busqueda.insert(tk.END, f"{item['nombre']}  ·  {item['categoria']}")
+            self.lista_busqueda.insert(tk.END, f"{item['nombre']} | {item['categoria']}")
         self.lista_busqueda.selection_clear(0, tk.END)
         self.lista_busqueda.selection_set(0)
         self.lista_busqueda.activate(0)
@@ -1015,7 +1064,7 @@ class VentanaPrincipal:
 
         threading.Thread(target=trabajador, daemon=True).start()
 
-    def _aplicar_estado_internet(self, color, texto, privada, publica, vpn_texto="VPN: …", vpn_detalle=""):
+    def _aplicar_estado_internet(self, color, texto, privada, publica, vpn_texto="VPN: ...", vpn_detalle=""):
         if not self.root.winfo_exists():
             return
         self.indicador_internet.config(bg=color, text=texto)

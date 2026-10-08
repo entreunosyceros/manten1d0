@@ -247,7 +247,7 @@ def detectar_reparaciones():
         if pkg["a_medias"]:
             muestra = ", ".join(pkg["a_medias"][:4])
             if len(pkg["a_medias"]) > 4:
-                muestra += "…"
+                muestra += "..."
             detalle = f"Se detectaron paquetes parcialmente instalados: {muestra}."
         else:
             detalle = (
@@ -262,7 +262,7 @@ def detectar_reparaciones():
             "que": "Se ejecutará `dpkg --configure -a` para terminar instalaciones a medias.",
             "por_que": "Una instalación o actualización se interrumpió o quedó incompleta.",
             "riesgos": (
-                "Bajo–medio. Puede pedir configurar paquetes de forma interactiva "
+                "Bajo-medio. Puede pedir configurar paquetes de forma interactiva "
                 "en casos raros; normalmente termina solo."
             ),
             "automatico": True,
@@ -308,7 +308,7 @@ def detectar_reparaciones():
                 "id": "servicios_todos",
                 "nivel": "aviso",
                 "titulo": f"Reiniciar los {len(nombres)} servicios fallidos",
-                "detalle": ", ".join(nombres[:6]) + ("…" if len(nombres) > 6 else ""),
+                "detalle": ", ".join(nombres[:6]) + ("..." if len(nombres) > 6 else ""),
                 "que": (
                     "Se reiniciará cada unidad en fallo con `systemctl restart`:\n"
                     + ", ".join(nombres)
@@ -490,7 +490,7 @@ class RepararUbuntu:
             justify=tk.LEFT,
         ).pack(padx=14, pady=(0, 8))
 
-        self.lbl_estado = tk.Label(self.root, text="Comprobando…", anchor="w", justify=tk.LEFT)
+        self.lbl_estado = tk.Label(self.root, text="Comprobando...", anchor="w", justify=tk.LEFT)
         self.lbl_estado.pack(fill=tk.X, padx=14)
         self.progreso = ttk.Progressbar(self.root, mode="indeterminate")
         self.progreso.pack(fill=tk.X, padx=14, pady=(4, 8))
@@ -527,7 +527,7 @@ class RepararUbuntu:
         self.btn_utiles.pack(side=tk.LEFT, padx=6)
         ToolTip(
             self.btn_utiles,
-            "Muestra u oculta acciones útiles (audio, red, caché APT…) aunque no haya fallo",
+            "Muestra u oculta acciones útiles (audio, red, caché APT...) aunque no haya fallo",
         )
         btn_cerrar = tk.Button(botones, text="Cerrar", width=12, command=self.root.destroy)
         btn_cerrar.pack(side=tk.LEFT, padx=6)
@@ -581,7 +581,7 @@ class RepararUbuntu:
     def cargar(self):
         if self._ocupado:
             return
-        self._set_ocupado(True, "Buscando problemas reparables…")
+        self._set_ocupado(True, "Buscando problemas reparables...")
         for hijo in self.interior.winfo_children():
             hijo.destroy()
 
@@ -709,8 +709,8 @@ class RepararUbuntu:
             registrar("Reparar Ubuntu", f"{item['id']} cancelado", False)
             return
 
-        self._set_ocupado(True, f"Reparando: {item['titulo']}…")
-        self._log(f"→ {item['titulo']}")
+        self._set_ocupado(True, f"Reparando: {item['titulo']}...")
+        self._log(f"-> {item['titulo']}")
 
         def trabajador():
             return ejecutar_reparacion(item)
@@ -720,7 +720,7 @@ class RepararUbuntu:
                 return
             ok, mensaje = resultado
             self._set_ocupado(False)
-            self._log(("✓ " if ok else "✗ ") + mensaje)
+            self._log(("[OK] " if ok else "[ERROR] ") + mensaje)
             registrar("Reparar Ubuntu", f"{item['id']}: {mensaje[:200]}", ok)
             if ok:
                 messagebox.showinfo("Reparar Ubuntu", mensaje, parent=self.root)
@@ -732,7 +732,7 @@ class RepararUbuntu:
             if not self.root.winfo_exists():
                 return
             self._set_ocupado(False)
-            self._log(f"✗ {error}")
+            self._log(f"[ERROR] {error}")
             messagebox.showerror("Reparar Ubuntu", str(error), parent=self.root)
 
         en_hilo(self.root, trabajador, al_terminar=al_terminar, al_error=al_error)

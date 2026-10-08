@@ -18,13 +18,26 @@ RUTA_REGISTRO = os.path.join(RUTA_DATOS_USUARIO, "acciones.log")
 RUTA_HISTORIAL = os.path.join(RUTA_DATOS_USUARIO, "historial_comandos.json")
 MAX_HISTORIAL = 40
 
+_SIMBOLOS_DECORATIVOS = (
+    "●", "○", "◆", "▪", "►", "•", "★", "✓", "✔", "✗", "✘", "⚠",
+    "…", "—", "–", "→", "←", "✅", "❌", "·", "≈", "█", "░",
+)
+
+
+def texto_plano(valor):
+    """Quita simbolos decorativos que en algunas fuentes se ven como iconos."""
+    texto = str(valor)
+    for simbolo in _SIMBOLOS_DECORATIVOS:
+        texto = texto.replace(simbolo, "-")
+    return texto
+
 
 def registrar(accion, detalle="", exito=True):
     estado = "OK" if exito else "ERROR"
     marca = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    linea = f"[{marca}] [{estado}] {accion}"
+    linea = f"[{marca}] [{estado}] {texto_plano(accion)}"
     if detalle:
-        linea += f" — {detalle}"
+        linea += f" - {texto_plano(detalle)}"
     try:
         os.makedirs(RUTA_DATOS_USUARIO, exist_ok=True)
         with open(RUTA_REGISTRO, "a", encoding="utf-8") as archivo:
@@ -135,7 +148,8 @@ def leer_registro():
         return "Aún no hay acciones registradas."
     try:
         with open(RUTA_REGISTRO, "r", encoding="utf-8") as archivo:
-            return archivo.read() or "Aún no hay acciones registradas."
+            bruto = archivo.read() or "Aún no hay acciones registradas."
+        return texto_plano(bruto)
     except OSError as error:
         return f"No se pudo leer el registro: {error}"
 
@@ -229,7 +243,7 @@ def mostrar_historial_comandos(parent=None):
         for item in entradas:
             lista.insert(
                 tk.END,
-                f"{item.get('fecha', '')}  ·  {item.get('descripcion', '')}  ·  {item.get('comando', '')}",
+                f"{item.get('fecha', '')} | {item.get('descripcion', '')} | {item.get('comando', '')}",
             )
 
     def repetir_seleccion():

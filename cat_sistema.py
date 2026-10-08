@@ -74,7 +74,7 @@ def actualizar_sistema(master):
         master,
         lambda ok: messagebox.showinfo("Información", "Actualización completada")
         if ok
-        else messagebox.showerror("Error", "La actualización no se completó. Revisa Preferencias → Registro de acciones."),
+        else messagebox.showerror("Error", "La actualización no se completó. Revisa Preferencias -> Registro de acciones."),
     )
 
 def limpiar_cache(master):
@@ -85,7 +85,7 @@ def limpiar_cache(master):
         master,
         lambda ok: messagebox.showinfo("Información", "Limpieza de caché completada")
         if ok
-        else messagebox.showerror("Error", "La limpieza no se completó. Revisa Preferencias → Registro de acciones."),
+        else messagebox.showerror("Error", "La limpieza no se completó. Revisa Preferencias -> Registro de acciones."),
     )
 
 def abrir_gestor_software():
