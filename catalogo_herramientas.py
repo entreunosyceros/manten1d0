@@ -76,7 +76,7 @@ def construir_catalogo(app):
 
     entradas = [
         # Categorias
-        ("Inicio", "Inicio", "Diagnostico y resumen del equipo", lambda: ir("Inicio")),
+        ("Inicio", "Inicio", "Centro de salud del equipo", lambda: ir("Inicio")),
         ("Perfil Usuario", "Perfil Usuario", "Datos del usuario y carpeta personal", lambda: ir("Perfil Usuario")),
         ("Información", "Información", "Informe del sistema operativo", lambda: ir("Información")),
         ("Sistema", "Sistema", "Actualizaciones, espacio, servicios y hardware", lambda: ir("Sistema")),
@@ -87,7 +87,9 @@ def construir_catalogo(app):
         ("Diccionario", "Diccionario", "Comandos Gnu/Linux", lambda: ir("Diccionario")),
         ("Mis conceptos", "Diccionario", "Añadir terminos al diccionario", lambda: ir("Diccionario")),
         ("Notas", "Notas", "Apuntes rapidos", lambda: ir("Notas")),
-        # Inicio / diagnostico
+        # Inicio / centro de salud
+        ("Centro de salud del equipo", "Inicio", "Resumen cotidiano y comprobar el ordenador", lambda: ir("Inicio")),
+        ("Comprobar mi ordenador", "Inicio", "Diagnostico de solo lectura (resumen + detalle)", lambda: ir("Inicio")),
         ("Que problema tienes?", "Inicio", "Asistente por sintomas", panel(AsistenteProblemas)),
         ("Reparar Ubuntu", "Sistema", "Reparaciones guiadas por problema", panel(RepararUbuntu)),
         ("Informe de asistencia", "Inicio", "Diagnostico + datos del equipo para enviar", panel(InformeAsistencia)),

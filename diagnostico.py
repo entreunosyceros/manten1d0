@@ -44,6 +44,207 @@ def analizar_equipo():
     return items
 
 
+_ORDEN_NIVEL = {"ok": 0, "info": 1, "aviso": 2, "error": 3}
+
+
+def _peor_nivel(niveles):
+    peor = "ok"
+    for nivel in niveles:
+        if _ORDEN_NIVEL.get(nivel, 0) > _ORDEN_NIVEL.get(peor, 0):
+            peor = nivel
+    return peor
+
+
+def _area_de_item(item):
+    """Clasifica un ítem del diagnóstico en una de las 4 áreas del resumen."""
+    panel = item.get("panel") or ""
+    accion = item.get("accion") or ""
+    titulo = (item.get("titulo") or "").lower()
+    if accion == "reiniciar" or "reiniciar" in titulo or "reinicio" in titulo:
+        return "sistema"
+    if panel == "ActualizarTodo" or "actualizacion" in titulo or titulo == "sistema actualizado":
+        return "sistema"
+    if panel in ("LimpiezaEspacio", "EspacioDiscos"):
+        return "espacio"
+    if "disco" in titulo or "carpeta personal" in titulo or titulo.startswith("espacio"):
+        return "espacio"
+    if panel in ("ServiciosFallidos",) or "servicio" in titulo:
+        return "servicios"
+    if panel == "RepararUbuntu" and "servicio" in titulo:
+        return "servicios"
+    if panel == "CentroSeguridad" or "firewall" in titulo or "cortafuegos" in titulo:
+        return "seguridad"
+    return None
+
+
+def _resumen_sistema(items):
+    reinicio = [i for i in items if i.get("accion") == "reiniciar" or "reiniciar" in (i.get("titulo") or "").lower()]
+    updates = [
+        i for i in items
+        if i.get("panel") == "ActualizarTodo" or "actualizacion" in (i.get("titulo") or "").lower()
+        or (i.get("titulo") or "") == "Sistema actualizado"
+    ]
+    if reinicio and reinicio[0].get("nivel") != "ok":
+        base = reinicio[0]
+        return {
+            "id": "sistema",
+            "nivel": base.get("nivel", "aviso"),
+            "titulo_corto": "Reinicio pendiente",
+            "detalle": base.get("detalle") or "Hay que reiniciar para terminar de aplicar actualizaciones.",
+            "panel": base.get("panel"),
+            "destino": base.get("destino"),
+            "accion": base.get("accion"),
+        }
+    if updates:
+        base = updates[0]
+        if base.get("nivel") == "ok":
+            return {
+                "id": "sistema",
+                "nivel": "ok",
+                "titulo_corto": "Sistema actualizado",
+                "detalle": base.get("detalle") or "No hay actualizaciones APT pendientes.",
+                "panel": "ActualizarTodo",
+                "destino": "Sistema",
+            }
+        return {
+            "id": "sistema",
+            "nivel": base.get("nivel", "aviso"),
+            "titulo_corto": base.get("titulo") or "Hay actualizaciones pendientes",
+            "detalle": base.get("detalle") or "Conviene instalar las actualizaciones pendientes.",
+            "panel": "ActualizarTodo",
+            "destino": "Sistema",
+        }
+    return {
+        "id": "sistema",
+        "nivel": "info",
+        "titulo_corto": "Sistema",
+        "detalle": "No se pudo comprobar el estado de las actualizaciones.",
+        "panel": "ActualizarTodo",
+        "destino": "Sistema",
+    }
+
+
+def _resumen_espacio(items):
+    discos = [i for i in items if _area_de_item(i) == "espacio"]
+    if not discos:
+        return {
+            "id": "espacio",
+            "nivel": "info",
+            "titulo_corto": "Espacio en disco",
+            "detalle": "No se pudo consultar el uso del disco.",
+            "panel": "EspacioDiscos",
+            "destino": "Sistema",
+        }
+    peor = max(discos, key=lambda i: _ORDEN_NIVEL.get(i.get("nivel"), 0))
+    nivel = peor.get("nivel", "info")
+    if nivel == "ok":
+        titulo_corto = "Espacio suficiente"
+    elif nivel == "error":
+        titulo_corto = "Queda muy poco espacio"
+    elif nivel == "aviso":
+        titulo_corto = "Queda poco espacio en el disco"
+    else:
+        titulo_corto = peor.get("titulo") or "Espacio en disco"
+    return {
+        "id": "espacio",
+        "nivel": nivel,
+        "titulo_corto": titulo_corto,
+        "detalle": peor.get("detalle") or "",
+        "panel": peor.get("panel") or "LimpiezaEspacio",
+        "destino": "Sistema",
+    }
+
+
+def _resumen_servicios(items):
+    servicios = [i for i in items if _area_de_item(i) == "servicios"]
+    if not servicios:
+        return {
+            "id": "servicios",
+            "nivel": "info",
+            "titulo_corto": "Servicios",
+            "detalle": "No se pudo consultar los servicios del sistema.",
+            "panel": "ServiciosFallidos",
+            "destino": "Sistema",
+        }
+    base = servicios[0]
+    titulo = base.get("titulo") or ""
+    nivel = base.get("nivel", "info")
+    if nivel == "ok":
+        titulo_corto = "Ningún servicio con errores"
+    else:
+        # Reutiliza el conteo del diagnóstico: "N servicio(s) han fallado"
+        m = re.match(r"(\d+)\s+servicio", titulo, re.I)
+        if m:
+            n = int(m.group(1))
+            if n == 1:
+                titulo_corto = "Un servicio con errores"
+            else:
+                titulo_corto = f"{n} servicios con errores"
+        elif "no se pudieron" in titulo.lower():
+            titulo_corto = "No se pudieron listar los servicios"
+        else:
+            titulo_corto = titulo
+    return {
+        "id": "servicios",
+        "nivel": nivel,
+        "titulo_corto": titulo_corto,
+        "detalle": base.get("detalle") or "",
+        "panel": base.get("panel") or "ServiciosFallidos",
+        "destino": "Sistema",
+    }
+
+
+def _resumen_seguridad(items):
+    seguridad = [i for i in items if _area_de_item(i) == "seguridad"]
+    if not seguridad:
+        return {
+            "id": "seguridad",
+            "nivel": "info",
+            "titulo_corto": "Estado básico de seguridad",
+            "detalle": "No se pudo consultar el cortafuegos.",
+            "panel": "CentroSeguridad",
+            "destino": "Sistema",
+        }
+    base = seguridad[0]
+    titulo = (base.get("titulo") or "").lower()
+    nivel = base.get("nivel", "info")
+    if "activo" in titulo and "desactiv" not in titulo:
+        titulo_corto = "Cortafuegos activo"
+    elif "desactiv" in titulo or "inactivo" in titulo:
+        titulo_corto = "Cortafuegos apagado"
+    elif "no instalado" in titulo:
+        titulo_corto = "Cortafuegos no instalado"
+    elif "desconocido" in titulo:
+        titulo_corto = "Estado básico de seguridad"
+    else:
+        titulo_corto = "Estado básico de seguridad"
+    return {
+        "id": "seguridad",
+        "nivel": nivel,
+        "titulo_corto": titulo_corto,
+        "detalle": base.get("detalle") or "",
+        "panel": "CentroSeguridad",
+        "destino": "Sistema",
+    }
+
+
+def resumir_salud_equipo(items):
+    """Resume el diagnóstico en 4 bloques cotidianos (sin I/O)."""
+    items = list(items or [])
+    return [
+        _resumen_sistema(items),
+        _resumen_espacio(items),
+        _resumen_servicios(items),
+        _resumen_seguridad(items),
+    ]
+
+
+def comprobar_salud_equipo():
+    """Ejecuta el diagnóstico de solo lectura y devuelve items + resumen."""
+    items = analizar_equipo()
+    return {"items": items, "resumen": resumir_salud_equipo(items)}
+
+
 def listar_unidades_fallidas():
     """Lista unidades systemd en estado failed. Devuelve (unidades, error_o_None)."""
     proceso = _comando(

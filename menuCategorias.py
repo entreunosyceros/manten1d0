@@ -58,7 +58,7 @@ from cat_sistema import (
 from cat_sistema_extra import LimpiezaEspacio, SaludDiscos, ServiciosSystemd, Impresoras, EspacioDiscos, Cortafuegos, SnapFlatpak, Bluetooth, ServiciosFallidos, Sonido, Pantallas
 from tooltip import ToolTip, con_tooltip
 from registro import confirmar, en_hilo, sudo_run, ventana_progreso, mostrar_registro, mostrar_historial_comandos, _widget_vivo
-from diagnostico import analizar_equipo
+from diagnostico import comprobar_salud_equipo, resumir_salud_equipo
 from reparar import RepararUbuntu
 from actualizar_todo import ActualizarTodo
 from informe_asistencia import InformeAsistencia
@@ -173,7 +173,7 @@ def inicio_cat(self, mensaje_personalizado=None):
 
     titulo = tk.Label(
         self.area_central,
-        text="Diagnóstico del equipo",
+        text="Centro de salud del equipo",
         font=("Arial", 16, "bold"),
         bg=preferencias.color_fondo(),
         padx=10,
@@ -187,9 +187,9 @@ def inicio_cat(self, mensaje_personalizado=None):
     tk.Label(
         self.area_central,
         text=(
-            "Checklist del estado del equipo. Pulsa un resultado para abrir "
-            "la herramienta relacionada.\n"
-            "Atajos: Alt+1 Inicio, Alt+2 a Alt+0 el resto de categorías."
+            "Resumen claro del estado del ordenador. Pulsa «Comprobar mi ordenador» "
+            "para revisar actualizaciones, espacio, servicios y seguridad.\n"
+            "Atajos: Alt+1 Inicio, Alt+2 a Alt+0 el resto de categorias."
         ),
         bg=preferencias.color_fondo(),
         font=("Arial", 10),
@@ -198,33 +198,19 @@ def inicio_cat(self, mensaje_personalizado=None):
 
     marco_avisos = tk.Frame(self.area_central, bg=preferencias.color_fondo())
     marco_avisos.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
-    etiqueta_carga = tk.Label(marco_avisos, text="Analizando el equipo...", bg=preferencias.color_fondo())
-    etiqueta_carga.pack(pady=20)
 
-    def refrescar_checklist():
-        """Vuelve a diagnosticar sin reconstruir toda la pantalla de Inicio."""
-        if not _widget_vivo(marco_avisos):
-            return
-        for hijo in marco_avisos.winfo_children():
-            hijo.destroy()
-        tk.Label(
-            marco_avisos,
-            text="Analizando el equipo...",
-            bg=preferencias.color_fondo(),
-        ).pack(pady=20)
-        en_hilo(self.area_central, analizar_equipo, al_terminar=pintar)
+    estado = {"comprobado": False, "ocupado": False}
 
-    def abrir_toplevel(factory):
-        """Abre un Toplevel y, al cerrarlo, refresca el diagnostico de Inicio."""
+    def abrir_toplevel(factory, refrescar_al_cerrar=True):
+        """Abre un Toplevel; al cerrarlo refresca solo si ya hubo una comprobacion."""
         ventana = tk.Toplevel(self.area_central)
         factory(ventana)
 
         def al_destruir(event):
             if event.widget is not ventana:
                 return
-            if _widget_vivo(marco_avisos):
-                # Diferir un tick: el Destroy aun esta en curso
-                self.area_central.after(50, refrescar_checklist)
+            if refrescar_al_cerrar and estado["comprobado"] and _widget_vivo(marco_avisos):
+                self.area_central.after(50, comprobar)
 
         ventana.bind("<Destroy>", al_destruir)
         return ventana
@@ -247,34 +233,8 @@ def inicio_cat(self, mensaje_personalizado=None):
             return lambda d=destino: self.mostrar_subcategorias(d)
         return None
 
-    def pintar(items):
-        if not _widget_vivo(marco_avisos):
-            return
-        for hijo in marco_avisos.winfo_children():
-            hijo.destroy()
-
-        errores = sum(1 for i in items if i.get("nivel") == "error")
-        avisos = sum(1 for i in items if i.get("nivel") == "aviso")
-        if errores or avisos:
-            partes = []
-            if errores:
-                partes.append(f"{errores} problema" + ("s" if errores != 1 else ""))
-            if avisos:
-                partes.append(f"{avisos} aviso" + ("s" if avisos != 1 else ""))
-            texto_resumen = " | ".join(partes)
-            color_resumen = COLORES_AVISO["error"][0] if errores else COLORES_AVISO["aviso"][0]
-        else:
-            texto_resumen = "Sin problemas detectados"
-            color_resumen = COLORES_AVISO["ok"][0]
-        tk.Label(
-            marco_avisos,
-            text=texto_resumen,
-            font=("Arial", 11, "bold"),
-            fg=color_resumen,
-            bg=preferencias.color_fondo(),
-        ).pack(anchor="w", pady=(0, 8))
-
-        marco_botones = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
+    def _pintar_atajos(padre):
+        marco_botones = tk.Frame(padre, bg=preferencias.color_fondo())
         marco_botones.pack(side=tk.BOTTOM, pady=12)
         fila0 = tk.Frame(marco_botones, bg=preferencias.color_fondo())
         fila0.pack()
@@ -285,6 +245,15 @@ def inicio_cat(self, mensaje_personalizado=None):
         con_tooltip(
             tk.Button(
                 fila0,
+                text="Comprobar mi ordenador",
+                command=comprobar,
+                font=("Arial", 11, "bold"),
+            ),
+            "Ejecuta comprobaciones de solo lectura y actualiza el resumen",
+        ).pack(side=tk.LEFT, padx=6)
+        con_tooltip(
+            tk.Button(
+                fila0,
                 text="Que problema tienes?",
                 command=lambda: abrir_toplevel(AsistenteProblemas),
                 font=("Arial", 10, "bold"),
@@ -292,16 +261,12 @@ def inicio_cat(self, mensaje_personalizado=None):
             "Asistente: elige Internet, sonido, impresora, espacio, arranque... y diagnostica solo eso",
         ).pack(side=tk.LEFT, padx=6)
         con_tooltip(
-            tk.Button(fila1, text="Analizar mi equipo", command=refrescar_checklist),
-            "Vuelve a ejecutar el diagnóstico completo del equipo",
-        ).pack(side=tk.LEFT, padx=6)
-        con_tooltip(
             tk.Button(
                 fila1,
                 text="Reparar Ubuntu",
                 command=lambda: abrir_toplevel(RepararUbuntu),
             ),
-            "Detecta fallos y ofrece reparaciones guiadas por tarjeta (qué, por qué, riesgos)",
+            "Detecta fallos y ofrece reparaciones guiadas por tarjeta (que, por que, riesgos)",
         ).pack(side=tk.LEFT, padx=6)
         con_tooltip(
             tk.Button(
@@ -309,7 +274,7 @@ def inicio_cat(self, mensaje_personalizado=None):
                 text="Liberar espacio",
                 command=lambda: abrir_toplevel(LimpiezaEspacio),
             ),
-            "Analiza qué ocupa el disco y limpia con perfil rápido o profundo",
+            "Analiza que ocupa el disco y limpia con perfil rapido o profundo",
         ).pack(side=tk.LEFT, padx=6)
         con_tooltip(
             tk.Button(
@@ -325,12 +290,118 @@ def inicio_cat(self, mensaje_personalizado=None):
                 text="Informe de asistencia",
                 command=lambda: abrir_toplevel(InformeAsistencia),
             ),
-            "Genera un informe del diagnóstico y del equipo para enviárselo a quien te ayude",
+            "Genera un informe del diagnostico y del equipo para enviarselo a quien te ayude",
         ).pack(side=tk.LEFT, padx=6)
         con_tooltip(
             tk.Button(fila2, text="Ver registro de acciones", command=lambda: mostrar_registro(self.root)),
-            "Muestra el historial de acciones realizadas en esta sesión y anteriores",
+            "Muestra el historial de acciones realizadas en esta sesion y anteriores",
         ).pack(side=tk.LEFT, padx=6)
+
+    def _pintar_tarjeta(padre, bloque):
+        fondo, frente = COLORES_AVISO.get(bloque.get("nivel"), COLORES_AVISO["info"])
+        titulo_corto = _texto_plano(bloque.get("titulo_corto") or "")
+        detalle = _texto_plano(bloque.get("detalle") or "")
+        comando = comando_item(bloque)
+        boton = tk.Button(
+            padre,
+            text=f"{titulo_corto}\n{detalle}" if detalle else titulo_corto,
+            bg=fondo,
+            fg=frente,
+            justify=tk.LEFT,
+            anchor="w",
+            wraplength=520,
+            padx=12,
+            pady=10,
+            font=("Arial", 11, "bold"),
+            command=comando,
+        )
+        boton.pack(fill=tk.X, pady=4)
+        if bloque.get("accion") == "reiniciar":
+            ToolTip(boton, "Reinicia el equipo para terminar de aplicar las actualizaciones")
+        elif bloque.get("panel"):
+            ToolTip(boton, "Abre la herramienta relacionada con este resultado")
+        elif bloque.get("destino"):
+            ToolTip(boton, "Abre la categoria relacionada con este resultado")
+        else:
+            ToolTip(boton, detalle or "Resultado informativo")
+
+    def pintar_vacio():
+        if not _widget_vivo(marco_avisos):
+            return
+        for hijo in marco_avisos.winfo_children():
+            hijo.destroy()
+        tk.Label(
+            marco_avisos,
+            text=(
+                "Aun no se ha comprobado el equipo.\n"
+                "Pulsa «Comprobar mi ordenador» para ver el resumen "
+                "(actualizaciones, espacio, servicios y seguridad)."
+            ),
+            bg=preferencias.color_fondo(),
+            font=("Arial", 11),
+            justify=tk.CENTER,
+        ).pack(pady=24)
+        _pintar_atajos(marco_avisos)
+        preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
+
+    def pintar(resultado):
+        if not _widget_vivo(marco_avisos):
+            return
+        estado["ocupado"] = False
+        if isinstance(resultado, dict):
+            items = resultado.get("items") or []
+            resumen = resultado.get("resumen") or resumir_salud_equipo(items)
+        else:
+            items = list(resultado or [])
+            resumen = resumir_salud_equipo(items)
+        estado["comprobado"] = True
+
+        for hijo in marco_avisos.winfo_children():
+            hijo.destroy()
+
+        errores = sum(1 for i in items if i.get("nivel") == "error")
+        avisos = sum(1 for i in items if i.get("nivel") == "aviso")
+        if errores or avisos:
+            partes = []
+            if errores:
+                partes.append(f"{errores} problema" + ("s" if errores != 1 else ""))
+            if avisos:
+                partes.append(f"{avisos} aviso" + ("s" if avisos != 1 else ""))
+            texto_cabecera = " | ".join(partes)
+            color_cabecera = COLORES_AVISO["error"][0] if errores else COLORES_AVISO["aviso"][0]
+        else:
+            texto_cabecera = "Sin problemas detectados"
+            color_cabecera = COLORES_AVISO["ok"][0]
+        tk.Label(
+            marco_avisos,
+            text=texto_cabecera,
+            font=("Arial", 11, "bold"),
+            fg=color_cabecera,
+            bg=preferencias.color_fondo(),
+        ).pack(anchor="w", pady=(0, 6))
+
+        tk.Label(
+            marco_avisos,
+            text="Resumen",
+            font=("Arial", 12, "bold"),
+            bg=preferencias.color_fondo(),
+            anchor="w",
+        ).pack(anchor="w", pady=(4, 2))
+
+        marco_tarjetas = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
+        marco_tarjetas.pack(fill=tk.X, pady=(0, 8))
+        for bloque in resumen:
+            _pintar_tarjeta(marco_tarjetas, bloque)
+
+        _pintar_atajos(marco_avisos)
+
+        tk.Label(
+            marco_avisos,
+            text="Detalle de las comprobaciones",
+            font=("Arial", 12, "bold"),
+            bg=preferencias.color_fondo(),
+            anchor="w",
+        ).pack(anchor="w", pady=(8, 2))
 
         marco_lista = tk.Frame(marco_avisos, bg=preferencias.color_fondo())
         marco_lista.pack(fill=tk.BOTH, expand=True)
@@ -354,11 +425,11 @@ def inicio_cat(self, mensaje_personalizado=None):
         for item in items:
             fondo, frente = COLORES_AVISO.get(item["nivel"], COLORES_AVISO["info"])
             comando = comando_item(item)
-            titulo = _texto_plano(item["titulo"])
+            titulo_item = _texto_plano(item["titulo"])
             detalle = _texto_plano(item["detalle"])
             boton = tk.Button(
                 interior,
-                text=f"{titulo}\n{detalle}",
+                text=f"{titulo_item}\n{detalle}",
                 bg=fondo,
                 fg=frente,
                 justify=tk.LEFT,
@@ -374,13 +445,27 @@ def inicio_cat(self, mensaje_personalizado=None):
             elif item.get("panel"):
                 ToolTip(boton, "Abre la herramienta relacionada con este resultado")
             elif item.get("destino"):
-                ToolTip(boton, "Abre la categoría relacionada con este resultado")
+                ToolTip(boton, "Abre la categoria relacionada con este resultado")
             else:
                 ToolTip(boton, item.get("detalle") or "Resultado informativo")
 
         preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
-    en_hilo(self.area_central, analizar_equipo, al_terminar=pintar)
+    def comprobar():
+        if estado["ocupado"] or not _widget_vivo(marco_avisos):
+            return
+        estado["ocupado"] = True
+        for hijo in marco_avisos.winfo_children():
+            hijo.destroy()
+        tk.Label(
+            marco_avisos,
+            text="Comprobando el ordenador...",
+            bg=preferencias.color_fondo(),
+            font=("Arial", 11),
+        ).pack(pady=20)
+        en_hilo(self.area_central, comprobar_salud_equipo, al_terminar=pintar)
+
+    pintar_vacio()
     preferencias.cambiar_tema(self.area_central, preferencias.tema_seleccionado)
 
 
